@@ -10,10 +10,11 @@
 
 ## 当前实现状态
 
-- 当前阶段：Milestone 1（Android 骨架）**未执行**。
-- 已有内容：MVP 产品与技术设计、面向实施的工程约束、本地 Git 初始提交。
-- 尚无内容：Gradle 工程、Android 源码、测试、音频资源、可构建 APK 或真机验证结果。
-- 当前最新任务：建立项目交接基线；执行状态：**验收通过**。
+- 当前阶段：Milestone 4（强弱反馈）**已执行待验收**。
+- 已有内容：单模块 Kotlin/Compose Android App、首次设置与 session 统计持久化、Accelerometer/Gyroscope 生命周期管理、2 秒 RingBuffer、SwingDetector、ImpactDetector、SoundPool/Haptic、三档强度映射和 Debug 日志。
+- 自动验证：`./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` 于 2026-08-12 成功；Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
+- 尚未验证：没有连接的 Android 真机；因此挥拍跟手、音震同步、误触、连拍、设备传感器实际回调和当前音效的羽毛球质感均未验收。
+- 当前最新任务：完成真机前诊断与核心体验实施；执行状态：**已执行待验收**。
 
 ## 权威来源与阅读顺序
 
@@ -60,9 +61,8 @@ Accelerometer + Gyroscope
 
 ## 已验证的命令与运行事实
 
-- `git status --short --branch`：已验证本地仓库在 `main` 分支；交接包生成前工作树干净。
-- `git log --oneline -3`：已验证初始提交为 `34a73f9 docs: add AirSwing MVP design`。
-- 未运行构建、单元测试、模拟器或真机：仓库尚无 Android 工程文件，不能将设计结论表述为已实现或已验证体验。
+- `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon`：已成功执行，覆盖纯识别逻辑并生成 Debug APK。
+- `adb devices -l`：检查时无连接设备；不能从自动构建推断真实传感器、延迟或手感。
 
 ## 运行与验证注意事项
 
@@ -72,10 +72,10 @@ Accelerometer + Gyroscope
 
 ## 未决事项与风险
 
-- 尚未确认 Android 的最低/目标 SDK、包名、应用名称、首批真实音效资源和测试机型；这些需在 Milestone 1 前由实现者或项目负责人确定。
+- 已锁定 `minSdk 26`、`targetSdk/compileSdk 37`、包名 `com.knightspace.airswing`；未确认测试机型。
 - 手表研究迁移到直接握持手机存在坐标系、惯量、量程和采样率的 domain gap；先以固定握法、模长/相对峰值和每设备 baseline 适配，不能未经实机证据就宣称手感成立。
 - BADS_CLL 为后备诊断资源，默认不下载或复现实验；若未来商业化，不能默认把其 CC BY-NC-ND 4.0 数据当作训练资产。
-- 当前变更只新增交接文档，不会影响既有功能；后续 M1 的工程初始化会成为后续所有模块的基础，需要谨慎确定包结构与 SDK 边界。
+- 当前 CC0 素材是短促球棒撞击声，许可已记录，但还没有真机确认它能提供真实羽毛球击球质感；替换为合格羽毛球 sample 是 M4 真机验收项。
 
 ## 未来 Agent 工作规则
 
