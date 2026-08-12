@@ -162,7 +162,14 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
     var pulse by remember { mutableStateOf(false) }
     var debugText by remember { mutableStateOf("") }
     val sessionStartedAtMs = remember { System.currentTimeMillis() }
-    val recorder = remember { SensorRecorder() }
+    val config = remember { RecognitionConfig() }
+    val recorder = remember {
+        SensorRecorder(metadata = mapOf(
+            "app_version" to BuildConfig.VERSION_NAME,
+            "build_type" to BuildConfig.BUILD_TYPE,
+            "recognition_config" to config.toString(),
+        ))
+    }
     val exportCsv = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv"),
     ) { uri ->
@@ -174,7 +181,6 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
     }
 
     DisposableEffect(Unit) {
-        val config = RecognitionConfig()
         val pipeline = RecognitionPipeline(config)
         val audio = AudioEngine(context, config)
         val feedback = FeedbackCoordinator(audio, HapticEngine(context))
@@ -185,22 +191,87 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
         var lastImpactTimestampMs = 0L
 
         val sensor = SensorEngine(context) { frame ->
-            if (BuildConfig.DEBUG) recorder.record(frame)
-            if (status != PlayStatus.READY) return@SensorEngine
+            if (status != PlayStatus.READY) {
+                if (BuildConfig.DEBUG) recorder.recordSensor(frame, detectorState = status.name)
+                return@SensorEngine
+            }
             val result = pipeline.process(frame)
+            if (BuildConfig.DEBUG) {
+                recorder.recordSensor(
+                    frame = frame,
+                    detectorState = result.swing.state.name,
+                    swingScore = result.swing.swingScore,
+                    impactScore = result.impactScore,
+                )
+                if (result.swing.state.name != lastSwingState) {
+                    val rowType = when {
+                        result.swing.state.name == "COOLDOWN" -> "cooldown"
+                        lastSwingState == "COOLDOWN" && result.swing.state.name == "ARMED" -> "rearm"
+                        else -> "state_transition"
+                    }
+                    recorder.recordEvent(
+                        rowType = rowType,
+                        timestampNs = frame.timestampNs,
+                        detectorState = result.swing.state.name,
+                        swingScore = result.swing.swingScore,
+                        impactScore = result.impactScore,
+                        detail = "$lastSwingState->${result.swing.state.name}",
+                    )
+                }
+            }
             lastSwingState = result.swing.state.name
             lastSwingScore = result.swing.swingScore
             lastImpactScore = result.impactScore
             if (BuildConfig.DEBUG && result.swing.candidate) {
+                recorder.recordEvent(
+                    rowType = "candidate",
+                    timestampNs = frame.timestampNs,
+                    detectorState = result.swing.state.name,
+                    swingScore = result.swing.swingScore,
+                    impactScore = result.impactScore,
+                    detail = "candidate=true",
+                )
                 Log.d(LOG_TAG, "candidate sensorMs=${frame.timestampMs} score=${result.swing.swingScore}")
             }
             result.impact?.let { event ->
                 val detectedAtNs = SystemClock.elapsedRealtimeNanos()
+                if (BuildConfig.DEBUG) {
+                    recorder.recordEvent(
+                        rowType = "impact",
+                        timestampNs = detectedAtNs,
+                        detectorState = result.swing.state.name,
+                        swingScore = result.swing.swingScore,
+                        impactScore = event.impactScore,
+                        eventTimestampNs = event.timestampNs,
+                        detail = "strength=${config.mapStrength(event.strength)}",
+                    )
+                }
                 handler.postDelayed({
                     val dispatchNs = SystemClock.elapsedRealtimeNanos()
-                    if (status == PlayStatus.READY && feedback.dispatch(event)) {
+                    val accepted = status == PlayStatus.READY && feedback.dispatch(event)
+                    if (BuildConfig.DEBUG) {
+                        recorder.recordEvent(
+                            rowType = "audio_haptic",
+                            timestampNs = dispatchNs,
+                            detectorState = lastSwingState,
+                            impactScore = event.impactScore,
+                            eventTimestampNs = event.timestampNs,
+                            detail = "accepted=$accepted;play=$status;feedback=${audio.status}",
+                        )
+                    }
+                    if (accepted) {
                         lastImpactTimestampMs = event.timestampNs / 1_000_000
                         count++
+                        if (BuildConfig.DEBUG) {
+                            recorder.recordEvent(
+                                rowType = "count",
+                                timestampNs = dispatchNs,
+                                detectorState = lastSwingState,
+                                impactScore = event.impactScore,
+                                eventTimestampNs = event.timestampNs,
+                                detail = "count=$count",
+                            )
+                        }
                         pulse = true
                         handler.postDelayed({ pulse = false }, 180)
                         if (BuildConfig.DEBUG) {
@@ -296,7 +367,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
             }) { Text(if (recorder.isRecording) "停止记录" else "记录本局传感器") }
             if (recorder.frameCount > 0 && !recorder.isRecording) {
                 Button(onClick = { exportCsv.launch("airswing-session.csv") }) {
-                    Text("导出 CSV（${recorder.frameCount} 帧）")
+                    Text("导出 CSV（${recorder.frameCount} 帧 / ${recorder.rowCount} 行）")
                 }
             }
             Spacer(Modifier.height(16.dp))
