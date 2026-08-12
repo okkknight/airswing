@@ -2,6 +2,8 @@ package com.knightspace.airswing.recognition
 
 import com.knightspace.airswing.sensor.SensorFrame
 import com.knightspace.airswing.sensor.MotionSample
+import java.io.File
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -9,6 +11,82 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class RecognitionPipelineTest {
+    @Test fun `timeline csv parser ignores metadata and event rows`() {
+        val csv = sequenceOf(
+            "# airswing_csv_version=2",
+            "# app_version=0.1.0",
+            "row_type,timestamp_ns,ax,ay,az,gx,gy,gz,detector_state,swing_score,impact_score,event_timestamp_ns,detail",
+            "sensor,1000000,1.0,2.0,3.0,4.0,5.0,6.0,ARMED,1.0,2.0,,",
+            "candidate,1100000,,,,,,,PEAK_CANDIDATE,8.0,3.0,,candidate=true",
+            "sensor,2000000,7.0,8.0,9.0,10.0,11.0,12.0,FOLLOW_THROUGH,2.0,4.0,,",
+        )
+
+        val frames = parseReplayFrames(csv).toList()
+
+        assertEquals(2, frames.size)
+        assertEquals(1_000_000, frames[0].timestampNs)
+        assertEquals(6f, frames[0].gz)
+        assertEquals(7f, frames[1].ax)
+    }
+
+    @Test fun `legacy csv parser retains seven column sensor rows`() {
+        val frames = parseReplayFrames(sequenceOf(
+            "timestamp_ns,ax,ay,az,gx,gy,gz",
+            "1000000,1.0,2.0,3.0,4.0,5.0,6.0",
+        )).toList()
+
+        assertEquals(1, frames.size)
+        assertEquals(5f, frames.single().gy)
+    }
+
+    @Test fun `optional exported phone session produces impacts`() {
+        val csvPath = System.getenv("AIRSWING_REPLAY_CSV")
+        assumeTrue("Set AIRSWING_REPLAY_CSV to run the real-device replay", !csvPath.isNullOrBlank())
+        val pipeline = RecognitionPipeline()
+        val candidateTimesMs = mutableListOf<Long>()
+        val impactTimesMs = mutableListOf<Long>()
+
+        File(csvPath!!).useLines { lines ->
+            parseReplayFrames(lines).forEach { frame ->
+                val result = pipeline.process(frame)
+                if (result.swing.candidate) candidateTimesMs += frame.timestampNs / 1_000_000
+                result.impact?.let { impactTimesMs += it.timestampNs / 1_000_000 }
+            }
+        }
+
+        println("AirSwing phone replay: candidates=${candidateTimesMs.size} candidateTimesMs=$candidateTimesMs")
+        println("AirSwing phone replay: impacts=${impactTimesMs.size} impactTimesMs=$impactTimesMs")
+        val expectedMinimum = System.getenv("AIRSWING_REPLAY_MIN_IMPACTS")?.toIntOrNull() ?: 1
+        assertTrue(
+            impactTimesMs.size >= expectedMinimum,
+            "expected at least $expectedMinimum impacts, got ${candidateTimesMs.size} candidates and ${impactTimesMs.size} impacts",
+        )
+    }
+
+    private fun parseReplayFrames(lines: Sequence<String>): Sequence<SensorFrame> = sequence {
+        var timelineFormat = false
+        lines.forEach { line ->
+            if (line.isBlank() || line.startsWith('#')) return@forEach
+            if (line.startsWith("row_type,")) {
+                timelineFormat = true
+                return@forEach
+            }
+            if (line.startsWith("timestamp_ns,")) return@forEach
+            val value = line.split(',')
+            if (timelineFormat && value.firstOrNull() != "sensor") return@forEach
+            val offset = if (timelineFormat) 1 else 0
+            yield(SensorFrame(
+                timestampNs = value[offset].toLong(),
+                ax = value[offset + 1].toFloat(),
+                ay = value[offset + 2].toFloat(),
+                az = value[offset + 3].toFloat(),
+                gx = value[offset + 4].toFloat(),
+                gy = value[offset + 5].toFloat(),
+                gz = value[offset + 6].toFloat(),
+            ))
+        }
+    }
+
     @Test fun `a sustained rotational rise produces one swing candidate`() {
         val detector = SwingDetector(RecognitionConfig(minCandidateMs = 20, cooldownMs = 200))
         val updates = listOf(0L, 10L, 20L, 30L, 40L, 50L).map { time ->
@@ -22,7 +100,7 @@ class RecognitionPipelineTest {
         assertTrue(updates.count { it.candidate } == 1)
     }
     @Test fun `candidate with acceleration prominence creates virtual impact`() {
-        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f))
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, minImpactGyro = 0f, minImpactAcc = 0f))
         prime(detector)
         detector.process(sample(100, 9f, 15f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
         val event = detector.process(sample(110, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f))
@@ -30,7 +108,7 @@ class RecognitionPipelineTest {
         assertTrue(event.impactScore > 0f)
     }
     @Test fun `cooldown suppresses a second local peak`() {
-        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, cooldownMs = 280))
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, cooldownMs = 280, minImpactGyro = 0f, minImpactAcc = 0f))
         val swing = SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f)
         prime(detector)
         detector.process(sample(100, 9f, 15f), swing)
@@ -39,7 +117,7 @@ class RecognitionPipelineTest {
         assertNull(detector.process(sample(190, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f)))
     }
     @Test fun `impact offset is added to event timestamp`() {
-        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, impactOffsetMs = 55))
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, impactOffsetMs = 55, minImpactGyro = 0f, minImpactAcc = 0f))
         prime(detector)
         detector.process(sample(100, 9f, 15f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
         val event = detector.process(sample(110, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f))
@@ -59,6 +137,8 @@ class RecognitionPipelineTest {
             minImpactScore = 1.2f,
             minGyroProminence = 1.5f,
             minAccProminence = 1.5f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
         ))
         val noCandidate = SwingUpdate(SwingState.ACCELERATING, false, 1f, 1f, .2f)
         repeat(5) { index -> detector.process(sample(index * 10L, gyro = 1f, acc = 1f), noCandidate) }
@@ -71,12 +151,32 @@ class RecognitionPipelineTest {
         assertNull(onlyGyro)
     }
 
+    @Test fun `relative prominence near rest does not create a virtual impact`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.5f,
+            minAccProminence = 1.5f,
+            minImpactScore = 2.25f,
+        ))
+        val armed = SwingUpdate(SwingState.ARMED, false, .1f, .1f, .1f)
+        repeat(5) { detector.process(sample(it * 10L, .1f, .1f), armed) }
+
+        detector.process(
+            sample(100, 2.1f, 2.3f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 2.1f, 2.3f, .1f),
+        )
+        val event = detector.process(sample(110, 1f, 1f), armed)
+
+        assertNull(event)
+    }
+
     @Test fun `impact waits for both signals to fall from a local peak`() {
         val detector = ImpactDetector(RecognitionConfig(
             minGyroProminence = 1.2f,
             minAccProminence = 1.2f,
             minImpactScore = 1.5f,
             impactOffsetMs = 0,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
         ))
         prime(detector)
         val candidate = SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f)
@@ -98,6 +198,8 @@ class RecognitionPipelineTest {
             minAccProminence = 1.2f,
             minImpactScore = 1.5f,
             impactOffsetMs = 0,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
         ))
         prime(detector)
         val noCandidate = SwingUpdate(SwingState.ACCELERATING, false, 1f, 1f, .2f)
@@ -129,6 +231,8 @@ class RecognitionPipelineTest {
             minAccProminence = 1.2f,
             minImpactScore = 1.5f,
             impactOffsetMs = 0,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
         ))
         val sequence = listOf(
             frame(0, .1f, 9.81f),
@@ -145,6 +249,33 @@ class RecognitionPipelineTest {
 
         assertEquals(1, impacts.size)
         assertEquals(50L, impacts.single().timestampNs / 1_000_000)
+    }
+
+    @Test fun `phone swing can impact well after the initial swing candidate`() {
+        val pipeline = RecognitionPipeline(RecognitionConfig(
+            lowPassAlpha = 1f,
+            minCandidateMs = 20,
+            impactWindowMs = 100,
+            swingImpactWindowMs = 1_000,
+            minGyroProminence = 1.5f,
+            minAccProminence = 1.5f,
+            minImpactScore = 2.25f,
+            impactOffsetMs = 0,
+        ))
+        val sequence = buildList {
+            add(frame(0, .1f, 9.81f))
+            add(frame(10, .1f, 9.81f))
+            add(frame(20, 4f, 11.81f))
+            for (time in 30L..480L step 10) add(frame(time, 4f, 11.81f))
+            add(frame(500, 14f, 29.81f))
+            add(frame(510, 6f, 15.81f))
+        }
+
+        val results = sequence.map { pipeline.process(it) }
+
+        assertEquals(1, results.count { it.swing.candidate })
+        assertEquals(1, results.count { it.impact != null })
+        assertEquals(500L, results.single { it.impact != null }.impact!!.timestampNs / 1_000_000)
     }
 
     @Test fun `slow phone movement never becomes a swing candidate`() {
@@ -173,6 +304,30 @@ class RecognitionPipelineTest {
         assertEquals(SwingState.COOLDOWN, detector.process(sample(160, .5f, .2f, accRise = 0f)).state)
         assertEquals(SwingState.ARMED, detector.process(sample(170, .5f, .4f, accRise = 20f)).state)
         assertEquals(SwingState.ACCELERATING, detector.process(sample(180, 8f, 2f, gyroRise = 750f)).state)
+    }
+
+    @Test fun `phone remains rearmable when gyro settles above the stationary baseline`() {
+        val detector = SwingDetector(RecognitionConfig(minCandidateMs = 20, cooldownMs = 100))
+        detector.process(sample(0, .1f, .1f))
+        detector.process(sample(10, 8f, 2f, gyroRise = 790f))
+        assertTrue(detector.process(sample(30, 8f, 2f)).candidate)
+        detector.beginCooldown(30)
+
+        assertEquals(SwingState.COOLDOWN, detector.process(sample(160, 2.5f, .2f)).state)
+        assertEquals(SwingState.ARMED, detector.process(sample(170, 2.5f, .4f, accRise = 20f)).state)
+        assertEquals(SwingState.ACCELERATING, detector.process(sample(180, 8f, 2f, gyroRise = 550f)).state)
+        assertTrue(detector.process(sample(200, 8f, 2f)).candidate)
+    }
+
+    @Test fun `cooldown remembers activity fall until the next acceleration rising edge`() {
+        val detector = SwingDetector(RecognitionConfig(minCandidateMs = 20, cooldownMs = 100))
+        detector.process(sample(0, .1f, .1f))
+        detector.process(sample(10, 8f, 2f, gyroRise = 790f))
+        assertTrue(detector.process(sample(30, 8f, 2f)).candidate)
+        detector.beginCooldown(30)
+
+        assertEquals(SwingState.COOLDOWN, detector.process(sample(140, 2.5f, .2f, accRise = 0f)).state)
+        assertEquals(SwingState.ARMED, detector.process(sample(150, 5f, 1f, accRise = 80f)).state)
     }
 
     private fun prime(detector: ImpactDetector) {

@@ -44,11 +44,14 @@ class ImpactDetector(private val config: RecognitionConfig) {
         lastImpactScore = gyroProminence * accProminence
 
         if (swing.candidate) {
-            candidateUntilMs = sample.timestampMs + config.impactWindowMs
+            // The swing candidate marks a sustained high-speed stroke, not necessarily the
+            // impact itself. BadminSense searches a complete 2 s stroke window; within it,
+            // the IPF-inspired dual-signal prominence finds the virtual impact peak.
+            candidateUntilMs = sample.timestampMs + config.swingImpactWindowMs
             var best: ScoredMotion? = null
             recent.forEach { scored ->
                 val previousBest = best
-                if (isEligible(scored.gyroProminence, scored.accProminence, scored.score) &&
+                if (isEligible(scored) &&
                     (previousBest == null || peakMagnitude(scored.sample) > peakMagnitude(previousBest.sample))) {
                     best = scored
                 }
@@ -69,8 +72,11 @@ class ImpactDetector(private val config: RecognitionConfig) {
         val event = if (hasFallenFromPrevious) confirm(previousPeak) else null
 
         val currentPeak = pendingPeak
-        if (sample.timestampMs <= candidateUntilMs && comparisonCount > 0 &&
-            isEligible(gyroProminence, accProminence, lastImpactScore) &&
+        if (event != null) {
+            candidateUntilMs = Long.MIN_VALUE
+            pendingPeak = null
+        } else if (sample.timestampMs <= candidateUntilMs && comparisonCount > 0 &&
+            isEligible(sample, gyroProminence, accProminence, lastImpactScore) &&
             (currentPeak == null || peakMagnitude(sample) > peakMagnitude(currentPeak.sample))
         ) {
             pendingPeak = PeakCandidate(sample, gyroProminence, accProminence, lastImpactScore)
@@ -84,8 +90,21 @@ class ImpactDetector(private val config: RecognitionConfig) {
         return event
     }
 
-    private fun isEligible(gyroProminence: Float, accProminence: Float, score: Float): Boolean =
-        gyroProminence >= config.minGyroProminence &&
+    private fun isEligible(scored: ScoredMotion): Boolean = isEligible(
+        scored.sample,
+        scored.gyroProminence,
+        scored.accProminence,
+        scored.score,
+    )
+
+    private fun isEligible(
+        sample: MotionSample,
+        gyroProminence: Float,
+        accProminence: Float,
+        score: Float,
+    ): Boolean = sample.gyroActivity >= config.minImpactGyro &&
+            sample.accActivity >= config.minImpactAcc &&
+            gyroProminence >= config.minGyroProminence &&
             accProminence >= config.minAccProminence &&
             score >= config.minImpactScore
 

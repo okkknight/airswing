@@ -18,6 +18,7 @@ class SwingDetector(private val config: RecognitionConfig) {
     private var baselineGyro = .15f
     private var acceleratingAtMs = 0L
     private var cooldownAtMs = Long.MIN_VALUE
+    private var cooldownActivityFell = false
 
     fun process(sample: MotionSample): SwingUpdate {
         if (sample.deltaReset) {
@@ -32,9 +33,9 @@ class SwingDetector(private val config: RecognitionConfig) {
 
         if (state == SwingState.COOLDOWN) {
             val timeReady = sample.timestampMs - cooldownAtMs >= config.cooldownMs
-            val activityFell = sample.gyroActivity < config.rearmGyro
+            if (sample.gyroActivity < config.rearmGyro) cooldownActivityFell = true
             val newRise = sample.accRisePerSecond >= config.rearmAccRisePerSecond
-            if (timeReady && activityFell && newRise) state = SwingState.ARMED
+            if (timeReady && cooldownActivityFell && newRise) state = SwingState.ARMED
             return update(sample, score, false)
         }
 
@@ -66,6 +67,7 @@ class SwingDetector(private val config: RecognitionConfig) {
     fun beginCooldown(timestampMs: Long) {
         state = SwingState.COOLDOWN
         cooldownAtMs = timestampMs
+        cooldownActivityFell = false
     }
 
     fun reset() {
@@ -73,6 +75,7 @@ class SwingDetector(private val config: RecognitionConfig) {
         baselineGyro = .15f
         acceleratingAtMs = 0L
         cooldownAtMs = Long.MIN_VALUE
+        cooldownActivityFell = false
     }
 
     private fun update(sample: MotionSample, score: Float, candidate: Boolean) = SwingUpdate(

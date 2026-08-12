@@ -108,9 +108,9 @@ class HapticEngine(context: Context) : ImpactHaptic {
         val target = vibrator ?: return false
         if (!target.hasVibrator()) return false
         if (Build.VERSION.SDK_INT >= 29) {
-            target.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+            target.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
         } else {
-            target.vibrate(VibrationEffect.createOneShot(18, VibrationEffect.DEFAULT_AMPLITUDE))
+            target.vibrate(VibrationEffect.createOneShot(24, VibrationEffect.DEFAULT_AMPLITUDE))
         }
         return true
     }

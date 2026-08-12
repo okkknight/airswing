@@ -6,6 +6,7 @@ data class RecognitionConfig(
     val impactWindowMs: Long = 100,
 
     // Phone engineering initial values; tune here only after real-device evidence.
+    val swingImpactWindowMs: Long = 2_000, // research-reference complete stroke window
     val lowPassAlpha: Float = .22f, // phone engineering initial value
     val baselineAlpha: Float = .04f,
     val minimumBaseline: Float = .1f,
@@ -19,9 +20,11 @@ data class RecognitionConfig(
     val minGyroProminence: Float = 1.5f,
     val minAccProminence: Float = 1.5f,
     val minImpactScore: Float = 2.25f,
-    val impactOffsetMs: Long = 55, // phone engineering initial value
-    val cooldownMs: Long = 280,
-    val rearmGyro: Float = 1.5f,
+    val minImpactGyro: Float = 3f, // real-phone tuning value: reject near-rest ratio spikes
+    val minImpactAcc: Float = 3f, // real-phone tuning value: reject near-rest ratio spikes
+    val impactOffsetMs: Long = 0, // real-phone tuning value: causal dual-signal peak needs no extra delay
+    val cooldownMs: Long = 500, // research-reference IPF local-maximum neighborhood / real-time NMS
+    val rearmGyro: Float = 3f, // real-phone tuning value: between-stroke filtered gyro floor
     val rearmAccRisePerSecond: Float = 2f,
     val softStrength: Float = 1.8f, val hardStrength: Float = 3.5f,
 ) {
