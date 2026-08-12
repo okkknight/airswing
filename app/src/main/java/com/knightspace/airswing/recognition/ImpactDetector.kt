@@ -11,8 +11,15 @@ private data class PeakCandidate(
     val score: Float,
 )
 
+private data class ScoredMotion(
+    val sample: MotionSample,
+    val gyroProminence: Float,
+    val accProminence: Float,
+    val score: Float,
+)
+
 class ImpactDetector(private val config: RecognitionConfig) {
-    private val recent = ArrayDeque<MotionSample>()
+    private val recent = ArrayDeque<ScoredMotion>()
     private var gyroSum = 0f
     private var accSum = 0f
     private var lastImpactMs = Long.MIN_VALUE
@@ -22,10 +29,10 @@ class ImpactDetector(private val config: RecognitionConfig) {
         private set
 
     fun process(sample: MotionSample, swing: SwingUpdate): VirtualImpactEvent? {
-        while (recent.isNotEmpty() && sample.timestampMs - recent.first().timestampMs > config.impactWindowMs) {
+        while (recent.isNotEmpty() && sample.timestampMs - recent.first().sample.timestampMs > config.impactWindowMs) {
             val expired = recent.removeFirst()
-            gyroSum -= expired.gyroActivity
-            accSum -= expired.accActivity
+            gyroSum -= expired.sample.gyroActivity
+            accSum -= expired.sample.accActivity
         }
         val comparisonCount = recent.size
         val gyroMean = if (comparisonCount == 0) config.minimumBaseline else
@@ -36,7 +43,25 @@ class ImpactDetector(private val config: RecognitionConfig) {
         val accProminence = sample.accActivity / accMean
         lastImpactScore = gyroProminence * accProminence
 
-        if (swing.candidate) candidateUntilMs = sample.timestampMs + config.impactWindowMs
+        if (swing.candidate) {
+            candidateUntilMs = sample.timestampMs + config.impactWindowMs
+            var best: ScoredMotion? = null
+            recent.forEach { scored ->
+                val previousBest = best
+                if (isEligible(scored.gyroProminence, scored.accProminence, scored.score) &&
+                    (previousBest == null || peakMagnitude(scored.sample) > peakMagnitude(previousBest.sample))) {
+                    best = scored
+                }
+            }
+            best?.let { scored ->
+                pendingPeak = PeakCandidate(
+                    sample = scored.sample,
+                    gyroProminence = scored.gyroProminence,
+                    accProminence = scored.accProminence,
+                    score = scored.score,
+                )
+            }
+        }
         val previousPeak = pendingPeak
         val hasFallenFromPrevious = previousPeak != null &&
             sample.gyroActivity < previousPeak.sample.gyroActivity &&
@@ -45,21 +70,27 @@ class ImpactDetector(private val config: RecognitionConfig) {
 
         val currentPeak = pendingPeak
         if (sample.timestampMs <= candidateUntilMs && comparisonCount > 0 &&
-            gyroProminence >= config.minGyroProminence &&
-            accProminence >= config.minAccProminence &&
-            lastImpactScore >= config.minImpactScore &&
-            (currentPeak == null || lastImpactScore > currentPeak.score)
+            isEligible(gyroProminence, accProminence, lastImpactScore) &&
+            (currentPeak == null || peakMagnitude(sample) > peakMagnitude(currentPeak.sample))
         ) {
             pendingPeak = PeakCandidate(sample, gyroProminence, accProminence, lastImpactScore)
         } else if (sample.timestampMs > candidateUntilMs || hasFallenFromPrevious) {
             pendingPeak = null
         }
 
-        recent.addLast(sample)
+        recent.addLast(ScoredMotion(sample, gyroProminence, accProminence, lastImpactScore))
         gyroSum += sample.gyroActivity
         accSum += sample.accActivity
         return event
     }
+
+    private fun isEligible(gyroProminence: Float, accProminence: Float, score: Float): Boolean =
+        gyroProminence >= config.minGyroProminence &&
+            accProminence >= config.minAccProminence &&
+            score >= config.minImpactScore
+
+    private fun peakMagnitude(sample: MotionSample?): Float =
+        sample?.let { it.gyroActivity * it.accActivity } ?: Float.NEGATIVE_INFINITY
 
     private fun confirm(peak: PeakCandidate): VirtualImpactEvent? {
         if (lastImpactMs != Long.MIN_VALUE && peak.sample.timestampMs - lastImpactMs < config.cooldownMs) return null

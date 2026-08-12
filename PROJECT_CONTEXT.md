@@ -12,8 +12,9 @@
 
 - 当前阶段：Milestone 4（强弱反馈）**已执行待验收**。
 - 已有内容：单模块 Kotlin/Compose Android App、Preferences DataStore 首次设置与 session 起止时间/统计持久化、Accelerometer/Gyroscope 生命周期与注册失败处理、低通滤波、2 秒 RingBuffer、SwingDetector、IPF-inspired 局部 prominence ImpactDetector、SoundPool/Haptic、三档强度映射、Debug 指标与手动 CSV 导出。
-- 自动验证：从 clean 状态执行 `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon` 于 2026-08-12 成功；24/24 单元测试通过，Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
-- 尚未验证：没有连接的 Android 真机；本地也没有现成 AVD，安装 API 37 镜像时 Android CLI 下载因 DNS 失败。因此 Activity 运行时启动、挥拍跟手、音震同步、误触、连拍、设备传感器实际回调和当前音效的羽毛球质感均未验收。
+- 自动验证：从 clean 状态执行 `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon` 于 2026-08-12 成功；25/25 单元测试通过，Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
+- API 37 模拟器验证：Debug APK 安装成功；MainActivity 冷启动；Home → Setup → Play → Result → Home 完整流程走通；SoundPool READY；加速度计/陀螺仪实际约 100Hz 注册、采样、后台注销和恢复单次重注册；两次合成 Sensor 注入分别产生一次 impact，计数从 0 → 1 → 2；session 统计持久化且非首次路由正确；无 AndroidRuntime 崩溃。
+- 尚未验证：没有连接的 Android 真机；因此真实手持挥拍的跟手感、音震主观同步、普通移动误触、真实连续挥拍漏触和手机扬声器上的三档音色仍未验收。模拟器 Sensor 注入只证明 Android 运行链路接线与重复触发约束，不证明真实体验。
 - 当前最新任务：完成真机前诊断与核心体验实施；执行状态：**已执行待验收**。
 
 ## 权威来源与阅读顺序
@@ -61,8 +62,10 @@ Accelerometer + Gyroscope
 
 ## 已验证的命令与运行事实
 
-- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon`：已成功执行，24/24 单元测试通过并生成 Debug/Release APK。
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon`：已成功执行，25/25 单元测试通过并生成 Debug/Release APK。
 - `adb devices -l`：检查时无连接设备；不能从自动构建推断真实传感器、延迟或手感。
+- API 37 ARM 模拟器：MainActivity 冷启动约 0.5–0.7 秒；Play 为 READY，SoundPool preload 完成；SensorEngine 获得 accelerometer/gyroscope 约 10ms 回调；后台两 listener 均注销，恢复后各只注册一次。
+- Emulator sensor injection：两次“静稳 → 高动态加速度/角速度 → 回落”序列分别产生一条 candidate/impact，UI 稳定计数 1、2；结果页与 DataStore 首页统计均为 2。
 
 ## 运行与验证注意事项
 

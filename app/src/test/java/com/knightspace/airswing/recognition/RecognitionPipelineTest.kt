@@ -91,6 +91,27 @@ class RecognitionPipelineTest {
         assertEquals(100L, event.timestampNs / 1_000_000)
     }
 
+    @Test fun `candidate can confirm a dual-signal peak from the preceding impact window`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            impactWindowMs = 100,
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            impactOffsetMs = 0,
+        ))
+        prime(detector)
+        val noCandidate = SwingUpdate(SwingState.ACCELERATING, false, 1f, 1f, .2f)
+        detector.process(sample(80, 12f, 18f), noCandidate)
+
+        val event = detector.process(
+            sample(100, 6f, 9f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 6f, 9f, .2f),
+        )
+
+        assertNotNull(event)
+        assertEquals(80L, event.timestampNs / 1_000_000)
+    }
+
     @Test fun `pipeline keeps raw frames in its configured two second window`() {
         val pipeline = RecognitionPipeline(RecognitionConfig(ringBufferMs = 2_000))
         pipeline.process(frame(0, .1f, 9.81f))
