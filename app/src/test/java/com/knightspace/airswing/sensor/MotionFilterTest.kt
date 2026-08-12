@@ -29,6 +29,20 @@ class MotionFilterTest {
         assertTrue(sample.deltaReset)
     }
 
+    @Test
+    fun `screen normal rotation ratio retains filtered phone axis direction`() {
+        val normalFilter = MotionFilter(RecognitionConfig(lowPassAlpha = 1f))
+        normalFilter.process(frame3d(0, gx = 0f, gy = 0f, gz = 1f))
+        val normal = normalFilter.process(frame3d(10, gx = 1f, gy = 1f, gz = 10f))
+
+        val planarFilter = MotionFilter(RecognitionConfig(lowPassAlpha = 1f))
+        planarFilter.process(frame3d(0, gx = 1f, gy = 0f, gz = 0f))
+        val planar = planarFilter.process(frame3d(10, gx = 10f, gy = 1f, gz = 1f))
+
+        assertTrue(normal.screenNormalRotationRatio > .9f)
+        assertTrue(planar.screenNormalRotationRatio < .2f)
+    }
+
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(
         timestampNs = ms * 1_000_000,
         ax = acc,
@@ -37,5 +51,15 @@ class MotionFilterTest {
         gx = gyro,
         gy = 0f,
         gz = 0f,
+    )
+
+    private fun frame3d(ms: Long, gx: Float, gy: Float, gz: Float) = SensorFrame(
+        timestampNs = ms * 1_000_000,
+        ax = 0f,
+        ay = 0f,
+        az = 9.81f,
+        gx = gx,
+        gy = gy,
+        gz = gz,
     )
 }

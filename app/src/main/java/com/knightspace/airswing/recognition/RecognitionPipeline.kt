@@ -8,6 +8,7 @@ data class RecognitionResult(
     val swing: SwingUpdate,
     val impact: VirtualImpactEvent?,
     val impactScore: Float,
+    val directionRejected: Boolean = false,
 )
 
 class RecognitionPipeline(private val config: RecognitionConfig = RecognitionConfig()) {
@@ -22,7 +23,12 @@ class RecognitionPipeline(private val config: RecognitionConfig = RecognitionCon
         val swing = swingDetector.process(sample)
         val impact = impactDetector.process(sample, swing)
         if (impact != null) swingDetector.beginCooldown(frame.timestampMs)
-        return RecognitionResult(swing, impact, impactDetector.lastImpactScore)
+        return RecognitionResult(
+            swing,
+            impact,
+            impactDetector.lastImpactScore,
+            impactDetector.lastDirectionRejected,
+        )
     }
 
     fun bufferedFrames(): List<SensorFrame> = frames.snapshot()

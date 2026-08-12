@@ -45,22 +45,37 @@ class RecognitionPipelineTest {
         val pipeline = RecognitionPipeline()
         val candidateTimesMs = mutableListOf<Long>()
         val impactTimesMs = mutableListOf<Long>()
+        val impactDelaysMs = mutableListOf<Long>()
+        val confirmations = mutableListOf<ImpactConfirmation>()
+        var directionRejects = 0
 
         File(csvPath!!).useLines { lines ->
             parseReplayFrames(lines).forEach { frame ->
                 val result = pipeline.process(frame)
                 if (result.swing.candidate) candidateTimesMs += frame.timestampNs / 1_000_000
-                result.impact?.let { impactTimesMs += it.timestampNs / 1_000_000 }
+                if (result.directionRejected) directionRejects++
+                result.impact?.let {
+                    impactTimesMs += it.timestampNs / 1_000_000
+                    impactDelaysMs += (frame.timestampNs - it.timestampNs) / 1_000_000
+                    confirmations += it.confirmation
+                }
             }
         }
 
         println("AirSwing phone replay: candidates=${candidateTimesMs.size} candidateTimesMs=$candidateTimesMs")
         println("AirSwing phone replay: impacts=${impactTimesMs.size} impactTimesMs=$impactTimesMs")
+        println("AirSwing phone replay: impactDelaysMs=$impactDelaysMs confirmations=$confirmations directionRejects=$directionRejects")
         val expectedMinimum = System.getenv("AIRSWING_REPLAY_MIN_IMPACTS")?.toIntOrNull() ?: 1
         assertTrue(
             impactTimesMs.size >= expectedMinimum,
             "expected at least $expectedMinimum impacts, got ${candidateTimesMs.size} candidates and ${impactTimesMs.size} impacts",
         )
+        System.getenv("AIRSWING_REPLAY_EXPECTED_IMPACTS")?.toIntOrNull()?.let { expected ->
+            assertEquals(expected, impactTimesMs.size, "unexpected real-device replay impact count")
+        }
+        System.getenv("AIRSWING_REPLAY_EXPECTED_DIRECTION_REJECTS")?.toIntOrNull()?.let { expected ->
+            assertEquals(expected, directionRejects, "unexpected real-device replay direction reject count")
+        }
     }
 
     private fun parseReplayFrames(lines: Sequence<String>): Sequence<SensorFrame> = sequence {
@@ -189,6 +204,138 @@ class RecognitionPipelineTest {
 
         assertNotNull(event)
         assertEquals(100L, event.timestampNs / 1_000_000)
+    }
+
+    @Test fun `high confidence phone impact confirms without waiting for a falling frame`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            earlyImpactGyro = 28f,
+            earlyImpactAcc = 145f,
+        ))
+        prime(detector)
+
+        assertNull(detector.process(
+            sample(100, gyro = 29f, acc = 150f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 29f, 150f, .2f),
+        ))
+        val event = detector.process(
+            sample(105, gyro = 30f, acc = 160f),
+            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 30f, 160f, .2f),
+        )
+
+        assertNotNull(event)
+        assertEquals(100L, event.timestampNs / 1_000_000)
+        assertEquals(ImpactConfirmation.EARLY_HIGH_CONFIDENCE, event.confirmation)
+    }
+
+    @Test fun `ordinary confidence impact still waits for both signals to fall`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            earlyImpactGyro = 28f,
+            earlyImpactAcc = 145f,
+        ))
+        prime(detector)
+
+        assertNull(detector.process(
+            sample(100, gyro = 20f, acc = 100f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 20f, 100f, .2f),
+        ))
+        assertNotNull(detector.process(
+            sample(110, gyro = 10f, acc = 50f),
+            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 10f, 50f, .2f),
+        ))
+    }
+
+    @Test fun `sustained screen normal rotation is rejected when motion is not high confidence`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            screenNormalRotationRatio = .85f,
+            screenNormalRotationMinFraction = .5f,
+            screenNormalRotationMinDurationMs = 40,
+        ))
+        prime(detector)
+        repeat(4) { index ->
+            detector.process(
+                sample(60 + index * 10L, gyro = 4f, acc = 4f, screenNormalRatio = .95f),
+                SwingUpdate(SwingState.ACCELERATING, false, 4f, 4f, .2f),
+            )
+        }
+
+        assertNull(detector.process(
+            sample(100, gyro = 12f, acc = 40f, screenNormalRatio = .95f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 12f, 40f, .2f),
+        ))
+        assertNull(detector.process(
+            sample(110, gyro = 6f, acc = 20f, screenNormalRatio = .95f),
+            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 6f, 20f, .2f),
+        ))
+        assertTrue(detector.lastDirectionRejected)
+    }
+
+    @Test fun `uncertain rotation direction remains eligible`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            screenNormalRotationRatio = .85f,
+            screenNormalRotationMinFraction = .5f,
+            screenNormalRotationMinDurationMs = 40,
+        ))
+        prime(detector)
+        detector.process(
+            sample(100, gyro = 12f, acc = 40f, screenNormalRatio = .7f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 12f, 40f, .2f),
+        )
+
+        assertNotNull(detector.process(
+            sample(110, gyro = 6f, acc = 20f, screenNormalRatio = .7f),
+            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 6f, 20f, .2f),
+        ))
+    }
+
+    @Test fun `strong impact remains eligible despite screen normal rotation`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            earlyImpactGyro = 28f,
+            earlyImpactAcc = 145f,
+            screenNormalRotationRatio = .85f,
+            screenNormalRotationMinFraction = .5f,
+            screenNormalRotationMinDurationMs = 40,
+        ))
+        prime(detector)
+        repeat(4) { index ->
+            detector.process(
+                sample(60 + index * 10L, gyro = 8f, acc = 130f, screenNormalRatio = .95f),
+                SwingUpdate(SwingState.ACCELERATING, false, 8f, 130f, .2f),
+            )
+        }
+        detector.process(
+            sample(100, gyro = 12f, acc = 150f, screenNormalRatio = .95f),
+            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 12f, 150f, .2f),
+        )
+
+        assertNotNull(detector.process(
+            sample(110, gyro = 6f, acc = 100f, screenNormalRatio = .95f),
+            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 6f, 100f, .2f),
+        ))
     }
 
     @Test fun `candidate can confirm a dual-signal peak from the preceding impact window`() {
@@ -341,12 +488,14 @@ class RecognitionPipelineTest {
         acc: Float,
         gyroRise: Float = 0f,
         accRise: Float = 0f,
+        screenNormalRatio: Float = 0f,
     ) = MotionSample(
         timestampNs = ms * 1_000_000,
         gyroActivity = gyro,
         accActivity = acc,
         gyroRisePerSecond = gyroRise,
         accRisePerSecond = accRise,
+        screenNormalRotationRatio = screenNormalRatio,
         deltaReset = false,
     )
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(ms * 1_000_000, acc, 0f, 0f, gyro, 0f, 0f)

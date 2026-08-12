@@ -233,6 +233,16 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                 )
                 Log.d(LOG_TAG, "candidate sensorMs=${frame.timestampMs} score=${result.swing.swingScore}")
             }
+            if (BuildConfig.DEBUG && result.directionRejected) {
+                recorder.recordEvent(
+                    rowType = "direction_reject",
+                    timestampNs = frame.timestampNs,
+                    detectorState = result.swing.state.name,
+                    swingScore = result.swing.swingScore,
+                    impactScore = result.impactScore,
+                    detail = "screen_normal_rotation",
+                )
+            }
             result.impact?.let { event ->
                 val detectedAtNs = SystemClock.elapsedRealtimeNanos()
                 if (BuildConfig.DEBUG) {
@@ -243,7 +253,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                         swingScore = result.swing.swingScore,
                         impactScore = event.impactScore,
                         eventTimestampNs = event.timestampNs,
-                        detail = "strength=${config.mapStrength(event.strength)}",
+                        detail = "strength=${config.mapStrength(event.strength)};confirmation=${event.confirmation}",
                     )
                 }
                 handler.postDelayed({

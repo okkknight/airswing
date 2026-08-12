@@ -22,6 +22,12 @@ data class RecognitionConfig(
     val minImpactScore: Float = 2.25f,
     val minImpactGyro: Float = 3f, // real-phone tuning value: reject near-rest ratio spikes
     val minImpactAcc: Float = 3f, // real-phone tuning value: reject near-rest ratio spikes
+    val earlyImpactGyro: Float = 28f, // real-phone tuning value: session9 lower bound with margin
+    val earlyImpactAcc: Float = 145f, // real-phone tuning value: session9 lower bound with margin
+    val screenNormalRotationRatio: Float = .85f, // real-phone tuning value: reject only clearly dominant Z rotation
+    val screenNormalRotationMinFraction: Float = .5f,
+    val screenNormalRotationMinDurationMs: Long = 40,
+    val screenNormalRotationMaxAcc: Float = 120f, // real-phone tuning value: high-energy strokes always pass
     val impactOffsetMs: Long = 0, // real-phone tuning value: causal dual-signal peak needs no extra delay
     val cooldownMs: Long = 500, // research-reference IPF local-maximum neighborhood / real-time NMS
     val rearmGyro: Float = 3f, // real-phone tuning value: between-stroke filtered gyro floor
