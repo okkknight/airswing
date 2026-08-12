@@ -1,9 +1,12 @@
 # 音效许可
 
-`app/src/main/res/raw/hit_soft.wav`、`hit_medium.wav` 与 `hit_hard.wav` 当前均源自 Shawn Eary 的 **Fake Metal Bat.wav**，CC0 1.0。
+`app/src/main/res/raw/hit_soft.wav`、`hit_medium.wav` 与 `hit_hard.wav` 均源自 PerMagnusLindborg 的 **Badminton.wav**，Creative Commons 0（CC0 1.0）。
 
-- 来源：https://commons.wikimedia.org/wiki/File:Fake_Metal_Bat.wav
-- 原文件说明：短促球棒击球声；本 MVP 用作低延迟击球反馈的临时 CC0 真实撞击 sample。
+- Freesound 来源：https://freesound.org/s/324244/
+- 作者：https://freesound.org/people/PerMagnusLindborg/
 - 许可：https://creativecommons.org/publicdomain/zero/1.0/
+- 下载日期：2026-08-12
+- 原文件：`audio_sources/324244__permagnuslindborg__badminton.wav`
+- 原文件 SHA-256：`745b6a48d7b257480a0427336674c4a75248abf268658d93707be485e56b3d18`
 
-在真机体验测试中，若其音色不能形成羽毛球击球质感，应以同为 CC0 的羽毛球/球拍录音替换；替换不能改变 `SoundPool` 预加载与三档映射接口。
+三个应用资源均从真实录音的同一次击球制作：保留前 0.4 秒并以 30ms fade-out 收尾，soft / medium / hard 分别使用 -8dB / -4dB / 0dB 增益；输出均为 48 kHz、16-bit、stereo PCM WAV。该处理不改变 CC0 状态。三档的实际听感差异仍需真机扬声器验证。

@@ -14,3 +14,9 @@
 - 以纯 Kotlin 实现 RingBuffer、挥拍状态机、自适应 baseline、局部 acc/gyro prominence ImpactDetector、cooldown/re-arm；Impact 直接驱动预加载的 SoundPool 和短促震动。
 - Play 页面在三档音效预加载完成前维持 LOADING；后台暂停 sensor listener，恢复时重启；Debug build 记录 candidate/impact 时间戳与分数。
 - 自动验证命令 `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` 已通过；没有连接真机，所有体验与真实设备结论仍待验收。
+
+## 2026-08-12 — M4 真实羽毛球音效
+
+- 用 PerMagnusLindborg 的 CC0 `Badminton.wav`（Freesound 324244）替换临时球棒音效，保留原始 WAV、来源、许可和 SHA-256 以便追溯。
+- 从同一次真实击球制作 0.4 秒 soft / medium / hard 三档 PCM WAV，移除无用尾部静音并使用确定性增益差异。
+- 将力度档位边界统一到 `RecognitionConfig` 并新增边界单元测试；三档听感和手机扬声器表现仍需真机验证。

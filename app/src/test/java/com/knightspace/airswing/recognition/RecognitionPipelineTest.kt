@@ -4,6 +4,7 @@ import com.knightspace.airswing.sensor.SensorFrame
 import org.junit.Test
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class RecognitionPipelineTest {
@@ -29,6 +30,14 @@ class RecognitionPipelineTest {
         val event = detector.process(frame(100, 9f, 25f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
         assertNotNull(event)
         assertTrue(event.timestampNs == 155_000_000L)
+    }
+    @Test fun `strength mapping uses configured soft and hard boundaries`() {
+        val config = RecognitionConfig(softStrength = 2f, hardStrength = 4f)
+
+        assertEquals(ImpactStrength.SOFT, config.mapStrength(1.99f))
+        assertEquals(ImpactStrength.MEDIUM, config.mapStrength(2f))
+        assertEquals(ImpactStrength.MEDIUM, config.mapStrength(3.99f))
+        assertEquals(ImpactStrength.HARD, config.mapStrength(4f))
     }
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(ms * 1_000_000, acc, 0f, 0f, gyro, 0f, 0f)
 }

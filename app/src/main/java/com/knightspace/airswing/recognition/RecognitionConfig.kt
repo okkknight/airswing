@@ -8,4 +8,12 @@ data class RecognitionConfig(
     val minImpactScore: Float = 1.2f, val impactOffsetMs: Long = 55, // phone engineering initial value
     val cooldownMs: Long = 280, val rearmGyro: Float = 1.5f,
     val softStrength: Float = 1.8f, val hardStrength: Float = 3.5f,
-)
+) {
+    fun mapStrength(strength: Float): ImpactStrength = when {
+        strength < softStrength -> ImpactStrength.SOFT
+        strength < hardStrength -> ImpactStrength.MEDIUM
+        else -> ImpactStrength.HARD
+    }
+}
+
+enum class ImpactStrength { SOFT, MEDIUM, HARD }
