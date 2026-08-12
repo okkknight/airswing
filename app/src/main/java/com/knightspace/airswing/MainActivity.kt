@@ -13,6 +13,7 @@ import com.knightspace.airswing.feedback.AudioEngine
 import com.knightspace.airswing.feedback.HapticEngine
 import com.knightspace.airswing.recognition.*
 import com.knightspace.airswing.sensor.SensorEngine
+import com.knightspace.airswing.domain.SessionStore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { AirSwingApp() } }
@@ -20,11 +21,11 @@ class MainActivity : ComponentActivity() {
 
 private enum class Screen { HOME, SETUP, PLAY, RESULT }
 @Composable private fun AirSwingApp() {
-    var screen by remember { mutableStateOf(Screen.HOME) }; var handed by remember { mutableStateOf("右手") }; var count by remember { mutableIntStateOf(0) }
+    val context = androidx.compose.ui.platform.LocalContext.current; val store = remember { SessionStore(context) }; var screen by remember { mutableStateOf(Screen.HOME) }; var handed by remember { mutableStateOf("右手") }; var count by remember { mutableIntStateOf(0) }
     MaterialTheme { Surface(Modifier.fillMaxSize()) { when (screen) {
-        Screen.HOME -> Page("空气挥拍", "把手机当成羽毛球拍") { Button(onClick = { screen = Screen.SETUP }) { Text("开始挥拍") } }
-        Screen.SETUP -> Page("像握球拍一样握住手机", "手机长轴对准球拍杆，握住下半部") { Row { listOf("右手", "左手").forEach { Button(onClick = { handed = it }, modifier = Modifier.padding(4.dp)) { Text(it) } } }; Button(onClick = { screen = Screen.PLAY }) { Text("开始") } }
-        Screen.PLAY -> PlayPage(onEnd = { finalCount -> count = finalCount; screen = Screen.RESULT })
+        Screen.HOME -> Page("空气挥拍", "上次 ${store.lastCount} 拍 · 累计 ${store.totalCount} 拍") { Button(onClick = { screen = if (store.hasSetup) Screen.PLAY else Screen.SETUP }) { Text("开始挥拍") } }
+        Screen.SETUP -> Page("像握球拍一样握住手机", "手机长轴对准球拍杆，握住下半部") { Row { listOf("右手", "左手").forEach { Button(onClick = { handed = it }, modifier = Modifier.padding(4.dp)) { Text(it) } } }; Button(onClick = { store.saveSetup(handed); screen = Screen.PLAY }) { Text("开始") } }
+        Screen.PLAY -> PlayPage(onEnd = { finalCount -> count = finalCount; store.saveSession(finalCount); screen = Screen.RESULT })
         Screen.RESULT -> Page("本次挥拍", "$count 拍") { Button(onClick = { screen = Screen.PLAY }) { Text("再来一局") }; Button(onClick = { screen = Screen.HOME }) { Text("返回首页") } }
     } } }
 }
