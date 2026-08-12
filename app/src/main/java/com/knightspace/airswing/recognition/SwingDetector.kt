@@ -1,27 +1,86 @@
 package com.knightspace.airswing.recognition
 
-import com.knightspace.airswing.sensor.SensorFrame
-import kotlin.math.abs
+import com.knightspace.airswing.sensor.MotionSample
 
 enum class SwingState { IDLE, ARMED, ACCELERATING, PEAK_CANDIDATE, FOLLOW_THROUGH, COOLDOWN }
-data class SwingUpdate(val state: SwingState, val candidate: Boolean, val gyroActivity: Float, val accActivity: Float, val baselineGyro: Float)
+
+data class SwingUpdate(
+    val state: SwingState,
+    val candidate: Boolean,
+    val gyroActivity: Float,
+    val accActivity: Float,
+    val baselineGyro: Float,
+    val swingScore: Float = 0f,
+)
 
 class SwingDetector(private val config: RecognitionConfig) {
-    private var state = SwingState.IDLE; private var baseline = .15f; private var lastGyro = 0f; private var candidateStarted = 0L; private var cooldownAt = Long.MIN_VALUE
-    fun reset() { state = SwingState.IDLE; baseline = .15f; lastGyro = 0f; candidateStarted = 0; cooldownAt = Long.MIN_VALUE }
-    fun process(frame: SensorFrame): SwingUpdate {
-        val gyro = frame.gyroMagnitude; val dynamicAcc = abs(frame.accMagnitude - 9.81f); val rise = gyro - lastGyro; lastGyro = gyro
-        if (gyro < config.stationaryGyro) baseline = baseline * .96f + gyro * .04f
-        val score = gyro / baseline.coerceAtLeast(.1f)
-        if (state == SwingState.COOLDOWN) { if (frame.timestampMs - cooldownAt >= config.cooldownMs && gyro < config.rearmGyro) state = SwingState.ARMED; return update(false, gyro, dynamicAcc) }
-        when (state) { SwingState.IDLE -> if (gyro < config.stationaryGyro) state = SwingState.ARMED
-            SwingState.ARMED -> if (score >= config.minSwingRatio && rise >= config.minGyroRise) { state = SwingState.ACCELERATING; candidateStarted = frame.timestampMs }
-            SwingState.ACCELERATING -> if (frame.timestampMs - candidateStarted >= config.minCandidateMs) state = SwingState.PEAK_CANDIDATE
-            SwingState.PEAK_CANDIDATE -> { state = SwingState.FOLLOW_THROUGH; return update(true, gyro, dynamicAcc) }
-            SwingState.FOLLOW_THROUGH -> if (gyro < config.rearmGyro) { state = SwingState.COOLDOWN; cooldownAt = frame.timestampMs }
-            else -> Unit }
-        return update(false, gyro, dynamicAcc)
+    private var state = SwingState.IDLE
+    private var baselineGyro = .15f
+    private var acceleratingAtMs = 0L
+    private var cooldownAtMs = Long.MIN_VALUE
+
+    fun process(sample: MotionSample): SwingUpdate {
+        if (sample.deltaReset) {
+            state = SwingState.IDLE
+            acceleratingAtMs = 0L
+        }
+        val stable = sample.gyroActivity < config.stationaryGyro && sample.accActivity < config.stationaryAcc
+        if (stable) {
+            baselineGyro += config.baselineAlpha * (sample.gyroActivity - baselineGyro)
+        }
+        val score = sample.gyroActivity / baselineGyro.coerceAtLeast(config.minimumBaseline)
+
+        if (state == SwingState.COOLDOWN) {
+            val timeReady = sample.timestampMs - cooldownAtMs >= config.cooldownMs
+            val activityFell = sample.gyroActivity < config.rearmGyro
+            val newRise = sample.accRisePerSecond >= config.rearmAccRisePerSecond
+            if (timeReady && activityFell && newRise) state = SwingState.ARMED
+            return update(sample, score, false)
+        }
+
+        when (state) {
+            SwingState.IDLE -> if (stable) state = SwingState.ARMED
+            SwingState.ARMED -> if (
+                score >= config.minSwingRatio &&
+                sample.gyroRisePerSecond >= config.minGyroRisePerSecond &&
+                sample.accActivity >= config.minSwingAcc
+            ) {
+                state = SwingState.ACCELERATING
+                acceleratingAtMs = sample.timestampMs
+            }
+            SwingState.ACCELERATING -> {
+                if (sample.gyroActivity < config.stationaryGyro) {
+                    state = SwingState.ARMED
+                } else if (sample.timestampMs - acceleratingAtMs >= config.minCandidateMs) {
+                    state = SwingState.PEAK_CANDIDATE
+                    return update(sample, score, true)
+                }
+            }
+            SwingState.PEAK_CANDIDATE -> state = SwingState.FOLLOW_THROUGH
+            SwingState.FOLLOW_THROUGH -> if (sample.gyroActivity < config.rearmGyro) state = SwingState.ARMED
+            else -> Unit
+        }
+        return update(sample, score, false)
     }
-    fun beginCooldown(timestampMs: Long) { state = SwingState.COOLDOWN; cooldownAt = timestampMs }
-    private fun update(candidate: Boolean, gyro: Float, acc: Float) = SwingUpdate(state, candidate, gyro, acc, baseline)
+
+    fun beginCooldown(timestampMs: Long) {
+        state = SwingState.COOLDOWN
+        cooldownAtMs = timestampMs
+    }
+
+    fun reset() {
+        state = SwingState.IDLE
+        baselineGyro = .15f
+        acceleratingAtMs = 0L
+        cooldownAtMs = Long.MIN_VALUE
+    }
+
+    private fun update(sample: MotionSample, score: Float, candidate: Boolean) = SwingUpdate(
+        state = state,
+        candidate = candidate,
+        gyroActivity = sample.gyroActivity,
+        accActivity = sample.accActivity,
+        baselineGyro = baselineGyro,
+        swingScore = score,
+    )
 }

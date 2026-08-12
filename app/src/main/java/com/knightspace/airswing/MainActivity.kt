@@ -1,42 +1,301 @@
 package com.knightspace.airswing
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import android.util.Log
-import com.knightspace.airswing.feedback.AudioEngine
-import com.knightspace.airswing.feedback.HapticEngine
-import com.knightspace.airswing.recognition.*
-import com.knightspace.airswing.sensor.SensorEngine
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.knightspace.airswing.domain.SessionStore
+import com.knightspace.airswing.domain.Handedness
+import com.knightspace.airswing.domain.SessionSummary
+import com.knightspace.airswing.debug.SensorRecorder
+import com.knightspace.airswing.feedback.AudioEngine
+import com.knightspace.airswing.feedback.FeedbackCoordinator
+import com.knightspace.airswing.feedback.FeedbackStatus
+import com.knightspace.airswing.feedback.HapticEngine
+import com.knightspace.airswing.feedback.feedbackDelayMs
+import com.knightspace.airswing.recognition.RecognitionConfig
+import com.knightspace.airswing.recognition.RecognitionPipeline
+import com.knightspace.airswing.sensor.SensorEngine
+import com.knightspace.airswing.sensor.SensorStartResult
+import java.util.Locale
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+
+private const val LOG_TAG = "AirSwing"
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { AirSwingApp() } }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { AirSwingApp() }
+    }
 }
 
 private enum class Screen { HOME, SETUP, PLAY, RESULT }
-@Composable private fun AirSwingApp() {
-    val context = androidx.compose.ui.platform.LocalContext.current; val store = remember { SessionStore(context) }; var screen by remember { mutableStateOf(Screen.HOME) }; var handed by remember { mutableStateOf("右手") }; var count by remember { mutableIntStateOf(0) }
-    MaterialTheme { Surface(Modifier.fillMaxSize()) { when (screen) {
-        Screen.HOME -> Page("空气挥拍", "上次 ${store.lastCount} 拍 · 累计 ${store.totalCount} 拍") { Button(onClick = { screen = if (store.hasSetup) Screen.PLAY else Screen.SETUP }) { Text("开始挥拍") } }
-        Screen.SETUP -> Page("像握球拍一样握住手机", "手机长轴对准球拍杆，握住下半部") { Row { listOf("右手", "左手").forEach { Button(onClick = { handed = it }, modifier = Modifier.padding(4.dp)) { Text(it) } } }; Button(onClick = { store.saveSetup(handed); screen = Screen.PLAY }) { Text("开始") } }
-        Screen.PLAY -> PlayPage(onEnd = { finalCount -> count = finalCount; store.saveSession(finalCount); screen = Screen.RESULT })
-        Screen.RESULT -> Page("本次挥拍", "$count 拍") { Button(onClick = { screen = Screen.PLAY }) { Text("再来一局") }; Button(onClick = { screen = Screen.HOME }) { Text("返回首页") } }
-    } } }
+private enum class PlayStatus { LOADING, READY, PAUSED, UNSUPPORTED_DEVICE, SENSOR_ERROR, FEEDBACK_ERROR }
+
+@Composable
+private fun AirSwingApp() {
+    val context = LocalContext.current
+    val store = remember { SessionStore(context) }
+    val initialPreferences by produceState<com.knightspace.airswing.domain.AppPreferences?>(initialValue = null) {
+        value = store.state.first()
+    }
+    val preferences by store.state.collectAsState(
+        initial = initialPreferences ?: com.knightspace.airswing.domain.AppPreferences(),
+    )
+    val scope = rememberCoroutineScope()
+    var screen by remember { mutableStateOf(Screen.HOME) }
+    var handedness by remember { mutableStateOf(Handedness.RIGHT) }
+    var count by remember { mutableIntStateOf(0) }
+
+    MaterialTheme {
+        Surface(Modifier.fillMaxSize()) {
+            when (screen) {
+                Screen.HOME -> Page(
+                    title = "空气挥拍",
+                    subtitle = "上次 ${preferences.lastCount} 拍 · 累计 ${preferences.totalCount} 拍",
+                ) {
+                    Button(
+                        enabled = initialPreferences != null,
+                        onClick = { screen = if (preferences.hasSetup) Screen.PLAY else Screen.SETUP },
+                    ) {
+                        Text("开始挥拍")
+                    }
+                }
+                Screen.SETUP -> Page(
+                    title = "像握球拍一样握住手机",
+                    subtitle = "手机长轴对准球拍杆，握住下半部",
+                ) {
+                    Row {
+                        listOf(Handedness.RIGHT to "右手", Handedness.LEFT to "左手").forEach { (hand, label) ->
+                            Button(
+                                onClick = { handedness = hand },
+                                modifier = Modifier.padding(4.dp),
+                            ) { Text(if (handedness == hand) "✓ $label" else label) }
+                        }
+                    }
+                    Button(onClick = {
+                        scope.launch {
+                            store.saveSetup(handedness)
+                            screen = Screen.PLAY
+                        }
+                    }) { Text("开始") }
+                }
+                Screen.PLAY -> PlayPage(onEnd = { session ->
+                    count = session.strokeCount
+                    scope.launch {
+                        store.saveSession(session)
+                    }
+                    screen = Screen.RESULT
+                })
+                Screen.RESULT -> Page("本次挥拍", "$count 拍") {
+                    Button(onClick = { screen = Screen.PLAY }) { Text("再来一局") }
+                    Button(onClick = { screen = Screen.HOME }) { Text("返回首页") }
+                }
+            }
+        }
+    }
 }
-@Composable private fun Page(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) { Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, content = { Text(title, style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(16.dp)); Text(subtitle); Spacer(Modifier.height(32.dp)); content() }) }
-@Composable private fun PlayPage(onEnd: (Int) -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current; val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    var count by remember { mutableIntStateOf(0) }; var supported by remember { mutableStateOf(true) }; var ready by remember { mutableStateOf(false) }; var paused by remember { mutableStateOf(false) }
-    DisposableEffect(Unit) { val config = RecognitionConfig(); val audio = AudioEngine(context, config); val haptic = HapticEngine(context); val swing = SwingDetector(config); val impact = ImpactDetector(config); val engine = SensorEngine(context) { frame -> if (audio.isReady()) { val update = swing.process(frame); if (BuildConfig.DEBUG && update.candidate) Log.d("AirSwing", "candidate t=${frame.timestampMs} gyro=${update.gyroActivity}"); impact.process(frame, update)?.let { event -> Log.d("AirSwing", "impact t=${event.timestampNs / 1_000_000} score=${event.impactScore}"); audio.play(event); haptic.play(); count++; swing.beginCooldown(frame.timestampMs) } } }; val observer = object : DefaultLifecycleObserver { override fun onResume(owner: LifecycleOwner) { paused = false; if (engine.supported) engine.start() }; override fun onPause(owner: LifecycleOwner) { paused = true; engine.stop() } }; supported = engine.supported; lifecycle.addObserver(observer); engine.start(); val poll = android.os.Handler(android.os.Looper.getMainLooper()); val readyCheck = object : Runnable { override fun run() { ready = audio.isReady(); if (!ready) poll.postDelayed(this, 30) } }; poll.post(readyCheck); onDispose { poll.removeCallbacks(readyCheck); lifecycle.removeObserver(observer); engine.stop(); audio.release() } }
-    val title = when { !supported -> "设备不支持"; paused -> "PAUSED"; !ready -> "LOADING"; else -> "READY" }
-    Page(title, if (supported) "$count\n${if (ready) "挥一下" else "正在加载击球音效"}" else "这台设备缺少必要传感器") { Button(onClick = { onEnd(count) }) { Text("结束练习") } }
+
+@Composable
+private fun Page(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(title, style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(16.dp))
+        Text(subtitle)
+        Spacer(Modifier.height(32.dp))
+        content()
+    }
+}
+
+@Composable
+private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var count by remember { mutableIntStateOf(0) }
+    var status by remember { mutableStateOf(PlayStatus.LOADING) }
+    var pulse by remember { mutableStateOf(false) }
+    var debugText by remember { mutableStateOf("") }
+    val sessionStartedAtMs = remember { System.currentTimeMillis() }
+    val recorder = remember { SensorRecorder() }
+    val exportCsv = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
+                writer.write(recorder.toCsv())
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val config = RecognitionConfig()
+        val pipeline = RecognitionPipeline(config)
+        val audio = AudioEngine(context, config)
+        val feedback = FeedbackCoordinator(audio, HapticEngine(context))
+        val handler = Handler(Looper.getMainLooper())
+        var lastSwingState = "IDLE"
+        var lastSwingScore = 0f
+        var lastImpactScore = 0f
+        var lastImpactTimestampMs = 0L
+
+        val sensor = SensorEngine(context) { frame ->
+            if (BuildConfig.DEBUG) recorder.record(frame)
+            if (status != PlayStatus.READY) return@SensorEngine
+            val result = pipeline.process(frame)
+            lastSwingState = result.swing.state.name
+            lastSwingScore = result.swing.swingScore
+            lastImpactScore = result.impactScore
+            if (BuildConfig.DEBUG && result.swing.candidate) {
+                Log.d(LOG_TAG, "candidate sensorMs=${frame.timestampMs} score=${result.swing.swingScore}")
+            }
+            result.impact?.let { event ->
+                val detectedAtNs = SystemClock.elapsedRealtimeNanos()
+                handler.postDelayed({
+                    val dispatchNs = SystemClock.elapsedRealtimeNanos()
+                    if (status == PlayStatus.READY && feedback.dispatch(event)) {
+                        lastImpactTimestampMs = event.timestampNs / 1_000_000
+                        count++
+                        pulse = true
+                        handler.postDelayed({ pulse = false }, 180)
+                        if (BuildConfig.DEBUG) {
+                            Log.d(
+                                LOG_TAG,
+                                "impact sensorMs=$lastImpactTimestampMs dispatchMs=${dispatchNs / 1_000_000} " +
+                                    "score=${event.impactScore} audioHaptic=called",
+                            )
+                        }
+                    } else if (BuildConfig.DEBUG) {
+                        Log.w(LOG_TAG, "impact rejected play=$status feedback=${audio.status}")
+                    }
+                }, feedbackDelayMs(event.timestampNs, detectedAtNs))
+            }
+        }
+
+        fun startSensor() {
+            pipeline.reset()
+            status = when (sensor.start()) {
+                SensorStartResult.STARTED, SensorStartResult.ALREADY_RUNNING -> when (audio.status) {
+                    FeedbackStatus.LOADING -> PlayStatus.LOADING
+                    FeedbackStatus.READY -> PlayStatus.READY
+                    FeedbackStatus.ERROR -> PlayStatus.FEEDBACK_ERROR
+                }
+                SensorStartResult.UNSUPPORTED -> PlayStatus.UNSUPPORTED_DEVICE
+                SensorStartResult.REGISTRATION_FAILED -> PlayStatus.SENSOR_ERROR
+            }
+        }
+
+        val statusPoll = object : Runnable {
+            override fun run() {
+                if (sensor.isRunning) {
+                    status = when (audio.status) {
+                        FeedbackStatus.LOADING -> PlayStatus.LOADING
+                        FeedbackStatus.READY -> PlayStatus.READY
+                        FeedbackStatus.ERROR -> PlayStatus.FEEDBACK_ERROR
+                    }
+                }
+                if (BuildConfig.DEBUG) {
+                    debugText = "sensor=${sensor.isRunning} frames=${sensor.frameCount} " +
+                        "dt=${String.format(Locale.US, "%.1f", sensor.sampleIntervalMs)}ms\n" +
+                        "audio=${audio.status} state=$lastSwingState " +
+                        "swing=${String.format(Locale.US, "%.1f", lastSwingScore)} " +
+                        "impact=${String.format(Locale.US, "%.1f", lastImpactScore)} " +
+                        "last=$lastImpactTimestampMs"
+                }
+                handler.postDelayed(this, 250)
+            }
+        }
+        val observer = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) = startSensor()
+            override fun onPause(owner: LifecycleOwner) {
+                sensor.stop()
+                pipeline.reset()
+                status = PlayStatus.PAUSED
+            }
+        }
+
+        lifecycle.addObserver(observer)
+        startSensor()
+        handler.post(statusPoll)
+        onDispose {
+            handler.removeCallbacksAndMessages(null)
+            lifecycle.removeObserver(observer)
+            sensor.stop()
+            pipeline.reset()
+            audio.release()
+        }
+    }
+
+    val title = when (status) {
+        PlayStatus.LOADING -> "LOADING"
+        PlayStatus.READY -> if (pulse) "啪" else "READY"
+        PlayStatus.PAUSED -> "PAUSED"
+        PlayStatus.UNSUPPORTED_DEVICE -> "设备不支持"
+        PlayStatus.SENSOR_ERROR -> "传感器启动失败"
+        PlayStatus.FEEDBACK_ERROR -> "击球音效加载失败"
+    }
+    val subtitle = when (status) {
+        PlayStatus.UNSUPPORTED_DEVICE -> "这台设备缺少加速度计或陀螺仪"
+        PlayStatus.SENSOR_ERROR -> "无法注册运动传感器，请重新进入练习"
+        PlayStatus.FEEDBACK_ERROR -> "无法预加载击球音效，请重新进入练习"
+        PlayStatus.LOADING -> "$count 拍\n正在准备传感器和击球音效"
+        PlayStatus.PAUSED -> "$count 拍\n返回前台后继续"
+        PlayStatus.READY -> "$count 拍\n挥一下"
+    }
+    Page(title, subtitle) {
+        if (BuildConfig.DEBUG && debugText.isNotEmpty()) {
+            Text(debugText, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = {
+                if (recorder.isRecording) recorder.stop() else recorder.start()
+            }) { Text(if (recorder.isRecording) "停止记录" else "记录本局传感器") }
+            if (recorder.frameCount > 0 && !recorder.isRecording) {
+                Button(onClick = { exportCsv.launch("airswing-session.csv") }) {
+                    Text("导出 CSV（${recorder.frameCount} 帧）")
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+        Button(onClick = {
+            onEnd(SessionSummary(sessionStartedAtMs, System.currentTimeMillis(), count))
+        }) { Text("结束练习") }
+    }
 }

@@ -11,9 +11,9 @@
 ## 当前实现状态
 
 - 当前阶段：Milestone 4（强弱反馈）**已执行待验收**。
-- 已有内容：单模块 Kotlin/Compose Android App、首次设置与 session 统计持久化、Accelerometer/Gyroscope 生命周期管理、2 秒 RingBuffer、SwingDetector、ImpactDetector、SoundPool/Haptic、三档强度映射和 Debug 日志。
-- 自动验证：`./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon` 于 2026-08-12 成功；Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
-- 尚未验证：没有连接的 Android 真机；因此挥拍跟手、音震同步、误触、连拍、设备传感器实际回调和当前音效的羽毛球质感均未验收。
+- 已有内容：单模块 Kotlin/Compose Android App、Preferences DataStore 首次设置与 session 起止时间/统计持久化、Accelerometer/Gyroscope 生命周期与注册失败处理、低通滤波、2 秒 RingBuffer、SwingDetector、IPF-inspired 局部 prominence ImpactDetector、SoundPool/Haptic、三档强度映射、Debug 指标与手动 CSV 导出。
+- 自动验证：从 clean 状态执行 `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon` 于 2026-08-12 成功；22/22 单元测试通过，Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
+- 尚未验证：没有连接的 Android 真机；本地也没有现成 AVD，安装 API 37 镜像时 Android CLI 下载因 DNS 失败。因此 Activity 运行时启动、挥拍跟手、音震同步、误触、连拍、设备传感器实际回调和当前音效的羽毛球质感均未验收。
 - 当前最新任务：完成真机前诊断与核心体验实施；执行状态：**已执行待验收**。
 
 ## 权威来源与阅读顺序
@@ -61,7 +61,7 @@ Accelerometer + Gyroscope
 
 ## 已验证的命令与运行事实
 
-- `./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon`：已成功执行，覆盖纯识别逻辑并生成 Debug APK。
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon`：已成功执行，22/22 单元测试通过并生成 Debug/Release APK。
 - `adb devices -l`：检查时无连接设备；不能从自动构建推断真实传感器、延迟或手感。
 
 ## 运行与验证注意事项
@@ -75,7 +75,7 @@ Accelerometer + Gyroscope
 - 已锁定 `minSdk 26`、`targetSdk/compileSdk 37`、包名 `com.knightspace.airswing`；未确认测试机型。
 - 手表研究迁移到直接握持手机存在坐标系、惯量、量程和采样率的 domain gap；先以固定握法、模长/相对峰值和每设备 baseline 适配，不能未经实机证据就宣称手感成立。
 - BADS_CLL 为后备诊断资源，默认不下载或复现实验；若未来商业化，不能默认把其 CC BY-NC-ND 4.0 数据当作训练资产。
-- 当前 CC0 素材是短促球棒撞击声，许可已记录，但还没有真机确认它能提供真实羽毛球击球质感；替换为合格羽毛球 sample 是 M4 真机验收项。
+- 当前三档音效源自 PerMagnusLindborg 的 CC0 真实羽毛球录音，来源与哈希已记录；仍需真机确认手机扬声器上的三档差异和击球质感。
 
 ## 未来 Agent 工作规则
 
