@@ -28,6 +28,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,6 +44,7 @@ import com.knightspace.airswing.domain.Handedness
 import com.knightspace.airswing.domain.SessionSummary
 import com.knightspace.airswing.domain.StartDestination
 import com.knightspace.airswing.domain.startDestination
+import com.knightspace.airswing.domain.estimatePeakLinearSpeedKmh
 import com.knightspace.airswing.debug.SensorRecorder
 import com.knightspace.airswing.feedback.AudioEngine
 import com.knightspace.airswing.feedback.FeedbackCoordinator
@@ -83,6 +85,7 @@ private fun AirSwingApp() {
     var screen by remember { mutableStateOf(Screen.HOME) }
     var handedness by remember { mutableStateOf(Handedness.RIGHT) }
     var count by remember { mutableIntStateOf(0) }
+    var peakSwingSpeed by remember { mutableFloatStateOf(0f) }
 
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
@@ -124,12 +127,16 @@ private fun AirSwingApp() {
                 }
                 Screen.PLAY -> PlayPage(onEnd = { session ->
                     count = session.strokeCount
+                    peakSwingSpeed = session.peakSwingSpeedRadPerSecond
                     scope.launch {
                         store.saveSession(session)
                     }
                     screen = Screen.RESULT
                 })
-                Screen.RESULT -> Page("本次挥拍", "$count 拍") {
+                Screen.RESULT -> Page(
+                    "本次挥拍",
+                    "$count 拍\n估算最高挥速 ${String.format(Locale.US, "%.0f", estimatePeakLinearSpeedKmh(peakSwingSpeed))} km/h",
+                ) {
                     Button(onClick = { screen = Screen.PLAY }) { Text("再来一局") }
                     Button(onClick = { screen = Screen.HOME }) { Text("返回首页") }
                 }
@@ -158,6 +165,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var count by remember { mutableIntStateOf(0) }
+    var peakSwingSpeed by remember { mutableFloatStateOf(0f) }
     var status by remember { mutableStateOf(PlayStatus.LOADING) }
     var pulse by remember { mutableStateOf(false) }
     var debugText by remember { mutableStateOf("") }
@@ -272,6 +280,9 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                     if (accepted) {
                         lastImpactTimestampMs = event.timestampNs / 1_000_000
                         count++
+                        if (event.peakAngularSpeedRadPerSecond > peakSwingSpeed) {
+                            peakSwingSpeed = event.peakAngularSpeedRadPerSecond
+                        }
                         if (BuildConfig.DEBUG) {
                             recorder.recordEvent(
                                 rowType = "count",
@@ -383,7 +394,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
             Spacer(Modifier.height(16.dp))
         }
         Button(onClick = {
-            onEnd(SessionSummary(sessionStartedAtMs, System.currentTimeMillis(), count))
+            onEnd(SessionSummary(sessionStartedAtMs, System.currentTimeMillis(), count, peakSwingSpeed))
         }) { Text("结束练习") }
     }
 }

@@ -11,12 +11,17 @@ data class SwingUpdate(
     val accActivity: Float,
     val baselineGyro: Float,
     val swingScore: Float = 0f,
+    val accelerationStartGyro: Float = gyroActivity,
+    val accelerationStartAcc: Float = accActivity,
+    val accelerationStartTimestampMs: Long = Long.MIN_VALUE,
 )
 
 class SwingDetector(private val config: RecognitionConfig) {
     private var state = SwingState.IDLE
     private var baselineGyro = .15f
     private var acceleratingAtMs = 0L
+    private var accelerationStartGyro = 0f
+    private var accelerationStartAcc = 0f
     private var cooldownAtMs = Long.MIN_VALUE
     private var cooldownActivityFell = false
 
@@ -24,6 +29,8 @@ class SwingDetector(private val config: RecognitionConfig) {
         if (sample.deltaReset) {
             state = SwingState.IDLE
             acceleratingAtMs = 0L
+            accelerationStartGyro = 0f
+            accelerationStartAcc = 0f
         }
         val stable = sample.gyroActivity < config.stationaryGyro && sample.accActivity < config.stationaryAcc
         if (stable) {
@@ -48,6 +55,8 @@ class SwingDetector(private val config: RecognitionConfig) {
             ) {
                 state = SwingState.ACCELERATING
                 acceleratingAtMs = sample.timestampMs
+                accelerationStartGyro = sample.gyroActivity
+                accelerationStartAcc = sample.accActivity
             }
             SwingState.ACCELERATING -> {
                 if (sample.gyroActivity < config.stationaryGyro) {
@@ -74,6 +83,8 @@ class SwingDetector(private val config: RecognitionConfig) {
         state = SwingState.IDLE
         baselineGyro = .15f
         acceleratingAtMs = 0L
+        accelerationStartGyro = 0f
+        accelerationStartAcc = 0f
         cooldownAtMs = Long.MIN_VALUE
         cooldownActivityFell = false
     }
@@ -85,5 +96,8 @@ class SwingDetector(private val config: RecognitionConfig) {
         accActivity = sample.accActivity,
         baselineGyro = baselineGyro,
         swingScore = score,
+        accelerationStartGyro = accelerationStartGyro,
+        accelerationStartAcc = accelerationStartAcc,
+        accelerationStartTimestampMs = acceleratingAtMs,
     )
 }

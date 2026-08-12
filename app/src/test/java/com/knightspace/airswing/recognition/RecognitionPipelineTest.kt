@@ -114,28 +114,43 @@ class RecognitionPipelineTest {
         }
         assertTrue(updates.count { it.candidate } == 1)
     }
+
+    @Test fun `delta reset clears frozen forward swing evidence`() {
+        val detector = SwingDetector(RecognitionConfig(minCandidateMs = 20))
+        detector.process(sample(0, .1f, .1f))
+        detector.process(sample(10, .1f, .1f))
+        detector.process(sample(20, 8f, 2f, gyroRise = 790f))
+
+        val reset = detector.process(sample(250, 9f, 3f, deltaReset = true))
+
+        assertEquals(0L, reset.accelerationStartTimestampMs)
+        assertEquals(0f, reset.accelerationStartGyro)
+        assertEquals(0f, reset.accelerationStartAcc)
+        assertEquals(SwingState.IDLE, reset.state)
+    }
     @Test fun `candidate with acceleration prominence creates virtual impact`() {
-        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, minImpactGyro = 0f, minImpactAcc = 0f))
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, minImpactGyro = 0f, minImpactAcc = 0f, minForwardGyroGrowth = 1f, minForwardAccGrowth = 1f))
         prime(detector)
-        detector.process(sample(100, 9f, 15f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
-        val event = detector.process(sample(110, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f))
+        detector.process(sample(100, 9f, 15f), candidateSwing(100, 9f, 15f))
+        val event = detector.process(sample(110, 5f, 8f), followSwing(100, 5f, 8f))
         assertNotNull(event)
         assertTrue(event.impactScore > 0f)
+        assertEquals(9f, event.peakAngularSpeedRadPerSecond)
     }
     @Test fun `cooldown suppresses a second local peak`() {
-        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, cooldownMs = 280, minImpactGyro = 0f, minImpactAcc = 0f))
-        val swing = SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f)
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, cooldownMs = 280, minImpactGyro = 0f, minImpactAcc = 0f, minForwardGyroGrowth = 1f, minForwardAccGrowth = 1f))
+        val swing = candidateSwing(100, 9f, 15f)
         prime(detector)
         detector.process(sample(100, 9f, 15f), swing)
-        assertNotNull(detector.process(sample(110, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f)))
+        assertNotNull(detector.process(sample(110, 5f, 8f), followSwing(100, 5f, 8f)))
         detector.process(sample(180, 9f, 15f), swing)
-        assertNull(detector.process(sample(190, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f)))
+        assertNull(detector.process(sample(190, 5f, 8f), followSwing(100, 5f, 8f)))
     }
     @Test fun `impact offset is added to event timestamp`() {
-        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, impactOffsetMs = 55, minImpactGyro = 0f, minImpactAcc = 0f))
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, impactOffsetMs = 55, minImpactGyro = 0f, minImpactAcc = 0f, minForwardGyroGrowth = 1f, minForwardAccGrowth = 1f))
         prime(detector)
-        detector.process(sample(100, 9f, 15f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
-        val event = detector.process(sample(110, 5f, 8f), SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f))
+        detector.process(sample(100, 9f, 15f), candidateSwing(100, 9f, 15f))
+        val event = detector.process(sample(110, 5f, 8f), followSwing(100, 5f, 8f))
         assertNotNull(event)
         assertTrue(event.timestampNs == 155_000_000L)
     }
@@ -154,6 +169,8 @@ class RecognitionPipelineTest {
             minAccProminence = 1.5f,
             minImpactGyro = 0f,
             minImpactAcc = 0f,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
         ))
         val noCandidate = SwingUpdate(SwingState.ACCELERATING, false, 1f, 1f, .2f)
         repeat(5) { index -> detector.process(sample(index * 10L, gyro = 1f, acc = 1f), noCandidate) }
@@ -192,14 +209,16 @@ class RecognitionPipelineTest {
             impactOffsetMs = 0,
             minImpactGyro = 0f,
             minImpactAcc = 0f,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
         ))
         prime(detector)
-        val candidate = SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f)
+        val candidate = candidateSwing(100, 9f, 15f)
 
         assertNull(detector.process(sample(100, 9f, 15f), candidate))
         val event = detector.process(
             sample(110, 5f, 8f),
-            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 5f, 8f, .2f),
+            followSwing(100, 5f, 8f),
         )
 
         assertNotNull(event)
@@ -241,17 +260,146 @@ class RecognitionPipelineTest {
             minImpactAcc = 0f,
             earlyImpactGyro = 28f,
             earlyImpactAcc = 145f,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
         ))
         prime(detector)
 
         assertNull(detector.process(
             sample(100, gyro = 20f, acc = 100f),
-            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 20f, 100f, .2f),
+            candidateSwing(100, 20f, 100f),
         ))
         assertNotNull(detector.process(
             sample(110, gyro = 10f, acc = 50f),
-            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 10f, 50f, .2f),
+            followSwing(100, 10f, 50f),
         ))
+    }
+
+    @Test fun `low confidence peak is discarded when both signals do not fall promptly`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            earlyImpactGyro = Float.MAX_VALUE,
+            earlyImpactAcc = Float.MAX_VALUE,
+        ))
+        prime(detector)
+        detector.process(
+            sample(150, gyro = 12f, acc = 20f),
+            swing(SwingState.PEAK_CANDIDATE, true, 12f, 20f, 100, 4f, 4f),
+        )
+        assertNull(detector.process(
+            sample(200, gyro = 13f, acc = 10f),
+            swing(SwingState.FOLLOW_THROUGH, false, 13f, 10f, 100, 4f, 4f),
+        ))
+
+        val lateEvent = detector.process(
+            sample(350, gyro = 6f, acc = 8f),
+            swing(SwingState.FOLLOW_THROUGH, false, 6f, 8f, 100, 4f, 4f),
+        )
+
+        assertNull(lateEvent)
+    }
+
+    @Test fun `low confidence impact requires clear forward swing growth after candidate`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1f,
+            minAccProminence = 1f,
+            minImpactScore = 1f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            earlyImpactGyro = Float.MAX_VALUE,
+            earlyImpactAcc = Float.MAX_VALUE,
+        ))
+        prime(detector)
+        detector.process(
+            sample(150, gyro = 7f, acc = 7f),
+            swing(SwingState.PEAK_CANDIDATE, true, 7f, 7f, 100, 6f, 6f),
+        )
+
+        val event = detector.process(
+            sample(160, gyro = 3f, acc = 3f),
+            swing(SwingState.FOLLOW_THROUGH, false, 3f, 3f, 100, 6f, 6f),
+        )
+
+        assertNull(event)
+    }
+
+    @Test fun `low confidence peak cannot use a stale swing candidate`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            earlyImpactGyro = Float.MAX_VALUE,
+            earlyImpactAcc = Float.MAX_VALUE,
+        ))
+        prime(detector)
+        detector.process(sample(150, gyro = 4f, acc = 4f), swing(SwingState.PEAK_CANDIDATE, true, 4f, 4f, 100, 2f, 2f))
+        listOf(
+            Triple(250L, 5f, 5f),
+            Triple(350L, 6f, 6f),
+            Triple(450L, 7f, 7f),
+            Triple(550L, 8f, 8f),
+            Triple(610L, 9f, 9f),
+        ).forEach { (time, gyro, acc) ->
+            detector.process(
+                sample(time, gyro = gyro, acc = acc),
+                swing(SwingState.FOLLOW_THROUGH, false, gyro, acc, 100, 2f, 2f),
+            )
+        }
+
+        val event = detector.process(
+            sample(620, gyro = 4f, acc = 4f),
+            swing(SwingState.FOLLOW_THROUGH, false, 4f, 4f, 100, 2f, 2f),
+        )
+
+        assertNull(event)
+    }
+
+    @Test fun `direction rejection uses the motion captured around the peak`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minGyroProminence = 1.2f,
+            minAccProminence = 1.2f,
+            minImpactScore = 1.5f,
+            earlyImpactGyro = Float.MAX_VALUE,
+            earlyImpactAcc = Float.MAX_VALUE,
+            screenNormalRotationRatio = .85f,
+            screenNormalRotationMinFraction = .5f,
+            screenNormalRotationMinDurationMs = 40,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
+        ))
+        prime(detector)
+        repeat(6) { index ->
+            detector.process(
+                sample(60 + index * 10L, gyro = 5f, acc = 8f, screenNormalRatio = .95f),
+                SwingUpdate(
+                    SwingState.ACCELERATING,
+                    false,
+                    5f,
+                    8f,
+                    .2f,
+                ),
+            )
+        }
+        detector.process(
+            sample(120, gyro = 8f, acc = 10f, screenNormalRatio = .95f),
+            swing(SwingState.PEAK_CANDIDATE, true, 8f, 10f, 60, 4f, 5f),
+        )
+        repeat(8) { index ->
+            detector.process(
+                sample(130 + index * 10L, gyro = 9f, acc = 11f, screenNormalRatio = .1f),
+                swing(SwingState.FOLLOW_THROUGH, false, 9f, 11f, 60, 4f, 5f),
+            )
+        }
+
+        val event = detector.process(
+            sample(220, gyro = 2f, acc = 3f, screenNormalRatio = .1f),
+            swing(SwingState.FOLLOW_THROUGH, false, 2f, 3f, 60, 4f, 5f),
+        )
+
+        assertNull(event)
+        assertTrue(detector.lastDirectionRejected)
     }
 
     @Test fun `sustained screen normal rotation is rejected when motion is not high confidence`() {
@@ -264,6 +412,8 @@ class RecognitionPipelineTest {
             screenNormalRotationRatio = .85f,
             screenNormalRotationMinFraction = .5f,
             screenNormalRotationMinDurationMs = 40,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
         ))
         prime(detector)
         repeat(4) { index ->
@@ -275,11 +425,11 @@ class RecognitionPipelineTest {
 
         assertNull(detector.process(
             sample(100, gyro = 12f, acc = 40f, screenNormalRatio = .95f),
-            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 12f, 40f, .2f),
+            candidateSwing(100, 12f, 40f),
         ))
         assertNull(detector.process(
             sample(110, gyro = 6f, acc = 20f, screenNormalRatio = .95f),
-            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 6f, 20f, .2f),
+            followSwing(100, 6f, 20f),
         ))
         assertTrue(detector.lastDirectionRejected)
     }
@@ -294,16 +444,18 @@ class RecognitionPipelineTest {
             screenNormalRotationRatio = .85f,
             screenNormalRotationMinFraction = .5f,
             screenNormalRotationMinDurationMs = 40,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
         ))
         prime(detector)
         detector.process(
             sample(100, gyro = 12f, acc = 40f, screenNormalRatio = .7f),
-            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 12f, 40f, .2f),
+            candidateSwing(100, 12f, 40f),
         )
 
         assertNotNull(detector.process(
             sample(110, gyro = 6f, acc = 20f, screenNormalRatio = .7f),
-            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 6f, 20f, .2f),
+            followSwing(100, 6f, 20f),
         ))
     }
 
@@ -314,6 +466,8 @@ class RecognitionPipelineTest {
             minImpactScore = 1.5f,
             minImpactGyro = 0f,
             minImpactAcc = 0f,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
             earlyImpactGyro = 28f,
             earlyImpactAcc = 145f,
             screenNormalRotationRatio = .85f,
@@ -329,16 +483,16 @@ class RecognitionPipelineTest {
         }
         detector.process(
             sample(100, gyro = 12f, acc = 150f, screenNormalRatio = .95f),
-            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 12f, 150f, .2f),
+            candidateSwing(100, 12f, 150f),
         )
 
         assertNotNull(detector.process(
             sample(110, gyro = 6f, acc = 100f, screenNormalRatio = .95f),
-            SwingUpdate(SwingState.FOLLOW_THROUGH, false, 6f, 100f, .2f),
+            followSwing(100, 6f, 100f),
         ))
     }
 
-    @Test fun `candidate can confirm a dual-signal peak from the preceding impact window`() {
+    @Test fun `low confidence candidate does not confirm a peak before forward swing starts`() {
         val detector = ImpactDetector(RecognitionConfig(
             impactWindowMs = 100,
             minGyroProminence = 1.2f,
@@ -347,6 +501,8 @@ class RecognitionPipelineTest {
             impactOffsetMs = 0,
             minImpactGyro = 0f,
             minImpactAcc = 0f,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
         ))
         prime(detector)
         val noCandidate = SwingUpdate(SwingState.ACCELERATING, false, 1f, 1f, .2f)
@@ -354,11 +510,10 @@ class RecognitionPipelineTest {
 
         val event = detector.process(
             sample(100, 6f, 9f),
-            SwingUpdate(SwingState.PEAK_CANDIDATE, true, 6f, 9f, .2f),
+            swing(SwingState.PEAK_CANDIDATE, true, 6f, 9f, 90, 1f, 1f),
         )
 
-        assertNotNull(event)
-        assertEquals(80L, event.timestampNs / 1_000_000)
+        assertNull(event)
     }
 
     @Test fun `pipeline keeps raw frames in its configured two second window`() {
@@ -372,7 +527,7 @@ class RecognitionPipelineTest {
 
     @Test fun `one complete synthetic swing produces exactly one virtual impact`() {
         val pipeline = RecognitionPipeline(RecognitionConfig(
-            lowPassAlpha = 1f,
+            lowPassCutoffHz = Float.POSITIVE_INFINITY,
             minCandidateMs = 20,
             minGyroProminence = 1.2f,
             minAccProminence = 1.2f,
@@ -400,7 +555,7 @@ class RecognitionPipelineTest {
 
     @Test fun `phone swing can impact well after the initial swing candidate`() {
         val pipeline = RecognitionPipeline(RecognitionConfig(
-            lowPassAlpha = 1f,
+            lowPassCutoffHz = Float.POSITIVE_INFINITY,
             minCandidateMs = 20,
             impactWindowMs = 100,
             swingImpactWindowMs = 1_000,
@@ -426,7 +581,7 @@ class RecognitionPipelineTest {
     }
 
     @Test fun `slow phone movement never becomes a swing candidate`() {
-        val pipeline = RecognitionPipeline(RecognitionConfig(lowPassAlpha = 1f, minCandidateMs = 20))
+        val pipeline = RecognitionPipeline(RecognitionConfig(lowPassCutoffHz = Float.POSITIVE_INFINITY, minCandidateMs = 20))
         val results = (0L..400L step 20).map { time ->
             val gyro = .1f + time / 400f
             pipeline.process(frame(time, gyro, 9.81f + time / 1_000f))
@@ -489,6 +644,7 @@ class RecognitionPipelineTest {
         gyroRise: Float = 0f,
         accRise: Float = 0f,
         screenNormalRatio: Float = 0f,
+        deltaReset: Boolean = false,
     ) = MotionSample(
         timestampNs = ms * 1_000_000,
         gyroActivity = gyro,
@@ -496,7 +652,46 @@ class RecognitionPipelineTest {
         gyroRisePerSecond = gyroRise,
         accRisePerSecond = accRise,
         screenNormalRotationRatio = screenNormalRatio,
-        deltaReset = false,
+        deltaReset = deltaReset,
+    )
+
+    private fun swing(
+        state: SwingState,
+        candidate: Boolean,
+        gyro: Float,
+        acc: Float,
+        startMs: Long,
+        startGyro: Float,
+        startAcc: Float,
+    ) = SwingUpdate(
+        state = state,
+        candidate = candidate,
+        gyroActivity = gyro,
+        accActivity = acc,
+        baselineGyro = .2f,
+        accelerationStartGyro = startGyro,
+        accelerationStartAcc = startAcc,
+        accelerationStartTimestampMs = startMs,
+    )
+
+    private fun candidateSwing(ms: Long, gyro: Float, acc: Float) = swing(
+        state = SwingState.PEAK_CANDIDATE,
+        candidate = true,
+        gyro = gyro,
+        acc = acc,
+        startMs = ms,
+        startGyro = gyro,
+        startAcc = acc,
+    )
+
+    private fun followSwing(ms: Long, gyro: Float, acc: Float) = swing(
+        state = SwingState.FOLLOW_THROUGH,
+        candidate = false,
+        gyro = gyro,
+        acc = acc,
+        startMs = ms,
+        startGyro = gyro,
+        startAcc = acc,
     )
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(ms * 1_000_000, acc, 0f, 0f, gyro, 0f, 0f)
 }

@@ -2,6 +2,8 @@ package com.knightspace.airswing.sensor
 
 import com.knightspace.airswing.recognition.RecognitionConfig
 import kotlin.math.abs
+import kotlin.math.PI
+import kotlin.math.exp
 import kotlin.math.sqrt
 
 data class MotionSample(
@@ -42,18 +44,41 @@ class MotionFilter(private val config: RecognitionConfig) {
             return sample(frame.timestampNs, previousGyro, previousDynamicAcc, 0f, 0f, false)
         }
 
-        val alpha = config.lowPassAlpha.coerceIn(0f, 1f)
+        val deltaNs = frame.timestampNs - previousTimestampNs
+        val validDelta = deltaNs > 0 && deltaNs <= config.maxFrameDeltaMs * 1_000_000
+        val seconds = if (validDelta) deltaNs / 1_000_000_000f else 1f
+        if (!validDelta) {
+            filteredGyro = frame.gyroMagnitude
+            filteredGx = frame.gx
+            filteredGy = frame.gy
+            filteredGz = frame.gz
+            filteredAcc = frame.accMagnitude
+            previousGyro = filteredGyro
+            previousDynamicAcc = abs(filteredAcc - 9.81f)
+            previousTimestampNs = frame.timestampNs
+            return sample(
+                frame.timestampNs,
+                previousGyro,
+                previousDynamicAcc,
+                0f,
+                0f,
+                true,
+                screenNormalRotationRatio(),
+            )
+        }
+        val alpha = when {
+            config.lowPassCutoffHz.isInfinite() -> 1f
+            config.lowPassCutoffHz <= 0f -> 0f
+            else -> (1.0 - exp(-2.0 * PI * config.lowPassCutoffHz * seconds)).toFloat()
+        }
         filteredGyro += alpha * (frame.gyroMagnitude - filteredGyro)
         filteredGx += alpha * (frame.gx - filteredGx)
         filteredGy += alpha * (frame.gy - filteredGy)
         filteredGz += alpha * (frame.gz - filteredGz)
         filteredAcc += alpha * (frame.accMagnitude - filteredAcc)
         val dynamicAcc = abs(filteredAcc - 9.81f)
-        val deltaNs = frame.timestampNs - previousTimestampNs
-        val validDelta = deltaNs > 0 && deltaNs <= config.maxFrameDeltaMs * 1_000_000
-        val seconds = if (validDelta) deltaNs / 1_000_000_000f else 1f
-        val gyroRise = if (validDelta) (filteredGyro - previousGyro) / seconds else 0f
-        val accRise = if (validDelta) (dynamicAcc - previousDynamicAcc) / seconds else 0f
+        val gyroRise = (filteredGyro - previousGyro) / seconds
+        val accRise = (dynamicAcc - previousDynamicAcc) / seconds
 
         previousGyro = filteredGyro
         previousDynamicAcc = dynamicAcc

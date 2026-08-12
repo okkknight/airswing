@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -16,10 +17,17 @@ private val Context.airSwingDataStore by preferencesDataStore(name = "airswing")
 
 enum class Handedness { LEFT, RIGHT }
 
+// Engineering estimate requested for the MVP: effective shoulder-to-phone radius for a 180 cm male.
+private const val STANDARD_EFFECTIVE_ARM_RADIUS_METERS = .80f
+
+fun estimatePeakLinearSpeedKmh(angularSpeedRadPerSecond: Float): Float =
+    angularSpeedRadPerSecond.coerceAtLeast(0f) * STANDARD_EFFECTIVE_ARM_RADIUS_METERS * 3.6f
+
 data class SessionSummary(
     val startedAtMs: Long,
     val endedAtMs: Long,
     val strokeCount: Int,
+    val peakSwingSpeedRadPerSecond: Float = 0f,
 )
 
 data class AppPreferences(
@@ -45,7 +53,12 @@ class SessionStore(private val dataStore: DataStore<Preferences>) {
             lastCount = lastCount,
             totalCount = preferences[Keys.TOTAL_COUNT] ?: 0,
             lastSession = if (lastStart != null && lastEnd != null) {
-                SessionSummary(lastStart, lastEnd, lastCount)
+                SessionSummary(
+                    lastStart,
+                    lastEnd,
+                    lastCount,
+                    preferences[Keys.LAST_PEAK_SWING_SPEED] ?: 0f,
+                )
             } else {
                 null
             },
@@ -64,6 +77,7 @@ class SessionStore(private val dataStore: DataStore<Preferences>) {
             preferences[Keys.LAST_START] = session.startedAtMs
             preferences[Keys.LAST_END] = session.endedAtMs
             preferences[Keys.LAST_COUNT] = session.strokeCount
+            preferences[Keys.LAST_PEAK_SWING_SPEED] = session.peakSwingSpeedRadPerSecond
             preferences[Keys.TOTAL_COUNT] = (preferences[Keys.TOTAL_COUNT] ?: 0) + session.strokeCount
         }
     }
@@ -74,6 +88,7 @@ class SessionStore(private val dataStore: DataStore<Preferences>) {
         val LAST_START = longPreferencesKey("lastStartedAtMs")
         val LAST_END = longPreferencesKey("lastEndedAtMs")
         val LAST_COUNT = intPreferencesKey("lastCount")
+        val LAST_PEAK_SWING_SPEED = floatPreferencesKey("lastPeakSwingSpeedRadPerSecond")
         val TOTAL_COUNT = intPreferencesKey("totalCount")
     }
 }

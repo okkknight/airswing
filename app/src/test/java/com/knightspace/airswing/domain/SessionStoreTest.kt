@@ -18,6 +18,12 @@ class SessionStoreTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun `peak angular speed estimates linear speed for standard 180cm male arm`() {
+        assertEquals(72f, estimatePeakLinearSpeedKmh(25f))
+        assertEquals(0f, estimatePeakLinearSpeedKmh(0f))
+    }
+
+    @Test
     fun `first launch has no setup and saved setup is restored`() = runBlocking {
         val store = SessionStore(dataStore())
         assertFalse(store.state.first().hasSetup)
@@ -33,14 +39,15 @@ class SessionStoreTest {
     fun `sessions persist timestamps last count and cumulative count`() = runBlocking {
         val store = SessionStore(dataStore())
 
-        store.saveSession(SessionSummary(startedAtMs = 100, endedAtMs = 300, strokeCount = 4))
-        store.saveSession(SessionSummary(startedAtMs = 400, endedAtMs = 900, strokeCount = 3))
+        store.saveSession(SessionSummary(startedAtMs = 100, endedAtMs = 300, strokeCount = 4, peakSwingSpeedRadPerSecond = 31.5f))
+        store.saveSession(SessionSummary(startedAtMs = 400, endedAtMs = 900, strokeCount = 3, peakSwingSpeedRadPerSecond = 27.25f))
 
         val state = store.state.first()
         assertEquals(3, state.lastCount)
         assertEquals(7, state.totalCount)
         assertEquals(400, state.lastSession?.startedAtMs)
         assertEquals(900, state.lastSession?.endedAtMs)
+        assertEquals(27.25f, state.lastSession?.peakSwingSpeedRadPerSecond)
     }
 
     private fun dataStore(): DataStore<Preferences> = PreferenceDataStoreFactory.create {

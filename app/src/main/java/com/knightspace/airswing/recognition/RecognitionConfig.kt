@@ -6,8 +6,12 @@ data class RecognitionConfig(
     val impactWindowMs: Long = 100,
 
     // Phone engineering initial values; tune here only after real-device evidence.
-    val swingImpactWindowMs: Long = 2_000, // research-reference complete stroke window
-    val lowPassAlpha: Float = .22f, // phone engineering initial value
+    val swingImpactWindowMs: Long = 2_000, // research-reference complete stroke window; retained for high-confidence recovery
+    val fallCandidateWindowMs: Long = 500, // phone engineering initial value: causal low-confidence association
+    val fallConfirmationWindowMs: Long = 150, // phone engineering initial value: only a prompt local fall confirms
+    val minForwardGyroGrowth: Float = 1.5f, // phone engineering initial value: dimensionless phase consistency
+    val minForwardAccGrowth: Float = 1.2f, // recall-first: retain weaker genuine phone swings
+    val lowPassCutoffHz: Float = 8f, // research-inspired cutoff; timestamp-derived alpha preserves ~200 Hz tuning
     val baselineAlpha: Float = .04f,
     val minimumBaseline: Float = .1f,
     val maxFrameDeltaMs: Long = 100, // phone engineering initial value

@@ -9,6 +9,7 @@ data class VirtualImpactEvent(
     val strength: Float,
     val impactScore: Float,
     val confirmation: ImpactConfirmation = ImpactConfirmation.FALL_CONFIRMED,
+    val peakAngularSpeedRadPerSecond: Float = 0f,
 )
 
 private data class PeakCandidate(
@@ -16,6 +17,16 @@ private data class PeakCandidate(
     val gyroProminence: Float,
     val accProminence: Float,
     val score: Float,
+    val accelerationStartTimestampMs: Long,
+    val accelerationStartGyro: Float,
+    val accelerationStartAcc: Float,
+    val directionSnapshot: DirectionSnapshot,
+)
+
+private data class DirectionSnapshot(
+    val dominantFraction: Float,
+    val dominantDurationMs: Long,
+    val maxAcc: Float,
 )
 
 private data class ScoredMotion(
@@ -72,6 +83,10 @@ class ImpactDetector(private val config: RecognitionConfig) {
                     gyroProminence = scored.gyroProminence,
                     accProminence = scored.accProminence,
                     score = scored.score,
+                    accelerationStartTimestampMs = swing.accelerationStartTimestampMs,
+                    accelerationStartGyro = swing.accelerationStartGyro,
+                    accelerationStartAcc = swing.accelerationStartAcc,
+                    directionSnapshot = directionSnapshot(scored.sample),
                 )
             }
         }
@@ -91,8 +106,19 @@ class ImpactDetector(private val config: RecognitionConfig) {
         val hasFallenFromPrevious = previousPeak != null &&
             sample.gyroActivity < previousPeak.sample.gyroActivity &&
             sample.accActivity < previousPeak.sample.accActivity
-        lastDirectionRejected = hasFallenFromPrevious && isScreenNormalRotationDominant()
-        val event = if (hasFallenFromPrevious && !lastDirectionRejected) confirm(previousPeak) else null
+        val fallIsPrompt = previousPeak != null &&
+            sample.timestampMs - previousPeak.sample.timestampMs <= config.fallConfirmationWindowMs
+        val fallCandidateIsFresh = previousPeak != null &&
+            previousPeak.accelerationStartTimestampMs != Long.MIN_VALUE &&
+            previousPeak.sample.timestampMs - previousPeak.accelerationStartTimestampMs <= config.fallCandidateWindowMs
+        val hasForwardGrowth = previousPeak != null &&
+            previousPeak.sample.timestampMs >= previousPeak.accelerationStartTimestampMs &&
+            previousPeak.sample.gyroActivity >= previousPeak.accelerationStartGyro * config.minForwardGyroGrowth &&
+            previousPeak.sample.accActivity >= previousPeak.accelerationStartAcc * config.minForwardAccGrowth
+        lastDirectionRejected = hasFallenFromPrevious && isScreenNormalRotationDominant(previousPeak.directionSnapshot)
+        val event = if (
+            hasFallenFromPrevious && fallIsPrompt && fallCandidateIsFresh && hasForwardGrowth && !lastDirectionRejected
+        ) confirm(previousPeak) else null
 
         val currentPeak = pendingPeak
         if (event != null) {
@@ -102,8 +128,21 @@ class ImpactDetector(private val config: RecognitionConfig) {
             isEligible(sample, gyroProminence, accProminence, lastImpactScore) &&
             (currentPeak == null || peakMagnitude(sample) > peakMagnitude(currentPeak.sample))
         ) {
-            pendingPeak = PeakCandidate(sample, gyroProminence, accProminence, lastImpactScore)
-        } else if (sample.timestampMs > candidateUntilMs || hasFallenFromPrevious) {
+            pendingPeak = PeakCandidate(
+                sample,
+                gyroProminence,
+                accProminence,
+                lastImpactScore,
+                currentPeak?.accelerationStartTimestampMs ?: swing.accelerationStartTimestampMs,
+                currentPeak?.accelerationStartGyro ?: swing.accelerationStartGyro,
+                currentPeak?.accelerationStartAcc ?: swing.accelerationStartAcc,
+                directionSnapshot(sample),
+            )
+        } else if (
+            sample.timestampMs > candidateUntilMs ||
+            hasFallenFromPrevious ||
+            (currentPeak != null && sample.timestampMs - currentPeak.sample.timestampMs > config.fallConfirmationWindowMs)
+        ) {
             pendingPeak = null
         }
 
@@ -138,8 +177,8 @@ class ImpactDetector(private val config: RecognitionConfig) {
         peak.sample.gyroActivity >= config.earlyImpactGyro &&
             peak.sample.accActivity >= config.earlyImpactAcc
 
-    /** Phone adaptation of IPF axis separation: uncertain or high-energy motion always remains eligible. */
-    private fun isScreenNormalRotationDominant(): Boolean {
+    /** Freeze the causal phone-axis evidence with the peak; confirmation may arrive after it leaves `recent`. */
+    private fun directionSnapshot(peak: MotionSample): DirectionSnapshot {
         var activeCount = 0
         var dominantCount = 0
         var firstDominantMs = Long.MAX_VALUE
@@ -147,6 +186,7 @@ class ImpactDetector(private val config: RecognitionConfig) {
         var maxAcc = 0f
         recent.forEach { scored ->
             val sample = scored.sample
+            if (sample.timestampMs > peak.timestampMs) return@forEach
             if (sample.accActivity > maxAcc) maxAcc = sample.accActivity
             if (sample.gyroActivity >= config.minImpactGyro) {
                 activeCount++
@@ -157,12 +197,27 @@ class ImpactDetector(private val config: RecognitionConfig) {
                 }
             }
         }
+        if (recent.none { it.sample.timestampNs == peak.timestampNs }) {
+            if (peak.accActivity > maxAcc) maxAcc = peak.accActivity
+            if (peak.gyroActivity >= config.minImpactGyro) {
+                activeCount++
+                if (peak.screenNormalRotationRatio >= config.screenNormalRotationRatio) {
+                    dominantCount++
+                    if (peak.timestampMs < firstDominantMs) firstDominantMs = peak.timestampMs
+                    if (peak.timestampMs > lastDominantMs) lastDominantMs = peak.timestampMs
+                }
+            }
+        }
         val dominantFraction = if (activeCount > 0) dominantCount.toFloat() / activeCount else 0f
         val dominantDurationMs = if (dominantCount > 1) lastDominantMs - firstDominantMs else 0L
-        return dominantFraction >= config.screenNormalRotationMinFraction &&
-            dominantDurationMs >= config.screenNormalRotationMinDurationMs &&
-            maxAcc < config.screenNormalRotationMaxAcc
+        return DirectionSnapshot(dominantFraction, dominantDurationMs, maxAcc)
     }
+
+    /** Phone adaptation of IPF axis separation: uncertain or high-energy motion always remains eligible. */
+    private fun isScreenNormalRotationDominant(snapshot: DirectionSnapshot): Boolean =
+        snapshot.dominantFraction >= config.screenNormalRotationMinFraction &&
+            snapshot.dominantDurationMs >= config.screenNormalRotationMinDurationMs &&
+            snapshot.maxAcc < config.screenNormalRotationMaxAcc
 
     private fun confirm(
         peak: PeakCandidate,
@@ -175,6 +230,7 @@ class ImpactDetector(private val config: RecognitionConfig) {
             strength = peak.gyroProminence,
             impactScore = peak.score,
             confirmation = confirmation,
+            peakAngularSpeedRadPerSecond = peak.sample.gyroActivity,
         )
     }
 
