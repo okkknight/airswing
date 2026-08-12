@@ -41,6 +41,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.knightspace.airswing.domain.SessionStore
 import com.knightspace.airswing.domain.Handedness
 import com.knightspace.airswing.domain.SessionSummary
+import com.knightspace.airswing.domain.StartDestination
+import com.knightspace.airswing.domain.startDestination
 import com.knightspace.airswing.debug.SensorRecorder
 import com.knightspace.airswing.feedback.AudioEngine
 import com.knightspace.airswing.feedback.FeedbackCoordinator
@@ -91,7 +93,12 @@ private fun AirSwingApp() {
                 ) {
                     Button(
                         enabled = initialPreferences != null,
-                        onClick = { screen = if (preferences.hasSetup) Screen.PLAY else Screen.SETUP },
+                        onClick = {
+                            screen = when (startDestination(preferences.hasSetup)) {
+                                StartDestination.SETUP -> Screen.SETUP
+                                StartDestination.PLAY -> Screen.PLAY
+                            }
+                        },
                     ) {
                         Text("开始挥拍")
                     }
