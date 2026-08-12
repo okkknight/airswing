@@ -30,3 +30,9 @@
 - 新增滤波、异常 delta、完整合成挥拍、慢速移动、双信号 prominence、cooldown/re-arm、反馈门控、preload 失败、DataStore 恢复和 recorder 测试。真实击球时机与手感仍只由真机验收。
 - 完成 25/25 单元测试、Debug Lint、Debug/Release 构建；API 37 模拟器已验证冷启动、完整页面流程、SoundPool READY、约 100Hz 双 Sensor 注册/采样/后台注销/恢复单次重注册、两次合成 sensor 注入各产生一次 impact，以及 Result/Home 统计持久化。
 - 模拟器注入暴露并修复“真实双信号峰早于 swing candidate 时漏掉 impact”的窗口相位问题：ImpactDetector 现在可回看 candidate 前约 100ms 的合格 prominence，并按滤波活动量乘积选择局部峰。真实手机挥拍体验仍未标记通过。
+
+## 2026-08-12 — 击球音震主观同步修正
+
+- 排查确认反馈调度先调用 SoundPool、后调用震动，主观震动抢先并非代码调用顺序导致；三个 WAV 的主击球瞬态原本均位于播放后约 121ms。
+- 仅裁去音效的弱前奏，将主瞬态提前至约 9ms；未移动 Virtual Impact、震动或 session 计数时机，以免改变已认可的击球点手感。
+- 新增音频资源回归测试，要求三档 WAV 的最强 1ms 瞬态位于前 15ms。实际扬声器输出延迟与音震同步仍需真机验证。
