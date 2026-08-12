@@ -12,7 +12,7 @@
 
 - 当前阶段：Milestone 4（强弱反馈）**已执行待验收**。
 - 已有内容：单模块 Kotlin/Compose Android App、Preferences DataStore 首次设置与 session 起止时间/统计持久化、Accelerometer/Gyroscope 生命周期与注册失败处理、低通滤波、2 秒 RingBuffer、SwingDetector、IPF-inspired 局部 prominence ImpactDetector、SoundPool/Haptic、三档强度映射、Debug 指标与手动 CSV 导出。
-- 自动验证：从 clean 状态执行 `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon` 于 2026-08-12 成功；22/22 单元测试通过，Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
+- 自动验证：从 clean 状态执行 `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon` 于 2026-08-12 成功；24/24 单元测试通过，Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
 - 尚未验证：没有连接的 Android 真机；本地也没有现成 AVD，安装 API 37 镜像时 Android CLI 下载因 DNS 失败。因此 Activity 运行时启动、挥拍跟手、音震同步、误触、连拍、设备传感器实际回调和当前音效的羽毛球质感均未验收。
 - 当前最新任务：完成真机前诊断与核心体验实施；执行状态：**已执行待验收**。
 
@@ -61,7 +61,7 @@ Accelerometer + Gyroscope
 
 ## 已验证的命令与运行事实
 
-- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon`：已成功执行，22/22 单元测试通过并生成 Debug/Release APK。
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon`：已成功执行，24/24 单元测试通过并生成 Debug/Release APK。
 - `adb devices -l`：检查时无连接设备；不能从自动构建推断真实传感器、延迟或手感。
 
 ## 运行与验证注意事项

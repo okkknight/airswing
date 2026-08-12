@@ -28,4 +28,4 @@
 - Sensor 注册失败、SoundPool 任一 sample 加载失败均进入明确错误状态；只有同一 impact 成功发起音频与触觉后才计数，并增加 180ms 视觉 pulse。
 - 持久化迁移到 Preferences DataStore，保存惯用手、session 起止时间、上次/累计挥拍数；Debug 页面增加低频指标和显式开启的有界 CSV 导出。
 - 新增滤波、异常 delta、完整合成挥拍、慢速移动、双信号 prominence、cooldown/re-arm、反馈门控、preload 失败、DataStore 恢复和 recorder 测试。真实击球时机与手感仍只由真机验收。
-- 从 clean 状态完成 22/22 单元测试、Debug Lint、Debug/Release 构建；无连接设备，API 37 AVD 镜像安装受 Android CLI DNS 失败阻断，因此未将运行时启动或任何体感项目标为通过。
+- 从 clean 状态完成 24/24 单元测试、Debug Lint、Debug/Release 构建；无连接设备，API 37 AVD 镜像安装受 Android CLI DNS 失败阻断，因此未将运行时启动或任何体感项目标为通过。
