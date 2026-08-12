@@ -3,6 +3,7 @@ package com.knightspace.airswing.recognition
 import com.knightspace.airswing.sensor.SensorFrame
 import org.junit.Test
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RecognitionPipelineTest {
@@ -16,6 +17,18 @@ class RecognitionPipelineTest {
         val event = detector.process(frame(100, 9f, 25f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
         assertNotNull(event)
         assertTrue(event.impactScore > 0f)
+    }
+    @Test fun `cooldown suppresses a second local peak`() {
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, cooldownMs = 280))
+        val swing = SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f)
+        assertNotNull(detector.process(frame(100, 9f, 25f), swing))
+        assertNull(detector.process(frame(180, 9f, 25f), swing))
+    }
+    @Test fun `impact offset is added to event timestamp`() {
+        val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, impactOffsetMs = 55))
+        val event = detector.process(frame(100, 9f, 25f), SwingUpdate(SwingState.PEAK_CANDIDATE, true, 9f, 15f, .2f))
+        assertNotNull(event)
+        assertTrue(event.timestampNs == 155_000_000L)
     }
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(ms * 1_000_000, acc, 0f, 0f, gyro, 0f, 0f)
 }
