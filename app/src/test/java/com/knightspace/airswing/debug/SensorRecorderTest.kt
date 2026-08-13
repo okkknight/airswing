@@ -35,13 +35,13 @@ class SensorRecorderTest {
         )
 
         val csv = recorder.toCsv()
-        assertTrue(csv.startsWith("# airswing_csv_version=2\n"))
+        assertTrue(csv.startsWith("# airswing_csv_version=3\n"))
         assertTrue(csv.contains("# app_version=0.1.0\n"))
         assertTrue(csv.contains("# recognition_config=test-config\n"))
-        assertTrue(csv.contains("row_type,timestamp_ns,ax,ay,az,gx,gy,gz,detector_state,swing_score,impact_score,event_timestamp_ns,detail\n"))
-        assertTrue(csv.contains("sensor,2000000,2.0,0.0,0.0,2.0,0.0,0.0,ARMED,4.5,1.2,,"))
-        assertTrue(csv.contains("candidate,2100000,,,,,,,PEAK_CANDIDATE,8.0,,,candidate accepted"))
-        assertTrue(csv.contains("impact,2200000,,,,,,,FOLLOW_THROUGH,,12.0,2050000,strength=HARD"))
+        assertTrue(csv.contains("row_type,timestamp_ns,ax,ay,az,gx,gy,gz,world_linear_ax,world_linear_ay,world_linear_az,detector_state,swing_score,impact_score,event_timestamp_ns,detail\n"))
+        assertTrue(csv.contains("sensor,2000000,2.0,0.0,0.0,2.0,0.0,0.0,,,,ARMED,4.5,1.2,,"))
+        assertTrue(csv.contains("candidate,2100000,,,,,,,,,,PEAK_CANDIDATE,8.0,,,candidate accepted"))
+        assertTrue(csv.contains("impact,2200000,,,,,,,,,,FOLLOW_THROUGH,,12.0,2050000,strength=HARD"))
         assertEquals(1, recorder.frameCount)
         assertEquals(3, recorder.rowCount)
     }
@@ -56,7 +56,7 @@ class SensorRecorderTest {
 
         val csv = recorder.toCsv()
         assertFalse(csv.contains("sensor,1000000,"))
-        assertTrue(csv.contains("candidate,2000000,,,,,,,,,,,\"score=4, accepted\""))
+        assertTrue(csv.contains("candidate,2000000,,,,,,,,,,,,,,\"score=4, accepted\""))
         assertTrue(csv.contains("sensor,3000000,"))
         assertEquals(1, recorder.frameCount)
         assertEquals(2, recorder.rowCount)

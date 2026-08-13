@@ -74,19 +74,22 @@ class SensorRecorder(
     }
 
     fun toCsv(): String = buildString {
-        appendLine("# airswing_csv_version=2")
+        appendLine("# airswing_csv_version=3")
         metadata.toSortedMap().forEach { (key, value) ->
             append("# ").append(key).append('=').append(value.replace("\n", " ")).append('\n')
         }
-        appendLine("row_type,timestamp_ns,ax,ay,az,gx,gy,gz,detector_state,swing_score,impact_score,event_timestamp_ns,detail")
+        appendLine("row_type,timestamp_ns,ax,ay,az,gx,gy,gz,world_linear_ax,world_linear_ay,world_linear_az,detector_state,swing_score,impact_score,event_timestamp_ns,detail")
         rows.forEach { row ->
             appendCsv(row.rowType).append(',').append(row.timestampNs).append(',')
             val frame = row.frame
             if (frame != null) {
                 append(frame.ax).append(',').append(frame.ay).append(',').append(frame.az).append(',')
-                append(frame.gx).append(',').append(frame.gy).append(',').append(frame.gz)
+                append(frame.gx).append(',').append(frame.gy).append(',').append(frame.gz).append(',')
+                appendFinite(frame.worldLinearAx).append(',')
+                appendFinite(frame.worldLinearAy).append(',')
+                appendFinite(frame.worldLinearAz)
             } else {
-                append(",,,,,")
+                append(",,,,,,,,")
             }
             append(',').appendCsv(row.detectorState).append(',')
             row.swingScore?.let(::append)
@@ -97,6 +100,9 @@ class SensorRecorder(
             append(',').appendCsv(row.detail).append('\n')
         }
     }
+
+    private fun StringBuilder.appendFinite(value: Float): StringBuilder =
+        if (value.isFinite()) append(value) else this
 
     private fun StringBuilder.appendCsv(value: String): StringBuilder {
         if (value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {

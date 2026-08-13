@@ -48,7 +48,11 @@ class ImpactDetector(private val config: RecognitionConfig) {
     var lastDirectionRejected: Boolean = false
         private set
 
-    fun process(sample: MotionSample, swing: SwingUpdate): VirtualImpactEvent? {
+    fun process(
+        sample: MotionSample,
+        swing: SwingUpdate,
+        strokeDecision: StrokeDecision? = null,
+    ): VirtualImpactEvent? {
         lastDirectionRejected = false
         while (recent.isNotEmpty() && sample.timestampMs - recent.first().sample.timestampMs > config.impactWindowMs) {
             val expired = recent.removeFirst()
@@ -63,6 +67,15 @@ class ImpactDetector(private val config: RecognitionConfig) {
         val gyroProminence = sample.gyroActivity / gyroMean
         val accProminence = sample.accActivity / accMean
         lastImpactScore = gyroProminence * accProminence
+
+        if (strokeDecision == StrokeDecision.REJECTED) {
+            candidateUntilMs = Long.MIN_VALUE
+            pendingPeak = null
+            recent.addLast(ScoredMotion(sample, gyroProminence, accProminence, lastImpactScore))
+            gyroSum += sample.gyroActivity
+            accSum += sample.accActivity
+            return null
+        }
 
         if (swing.candidate) {
             // The swing candidate marks a sustained high-speed stroke, not necessarily the
@@ -90,7 +103,11 @@ class ImpactDetector(private val config: RecognitionConfig) {
                 )
             }
         }
-        val earlyPeak = pendingPeak?.takeIf(::isHighConfidence)
+        // A strong IPF peak remains same-frame, but now also needs same-frame
+        // translational stroke evidence; high rotation alone is not a hit.
+        val earlyPeak = pendingPeak?.takeIf {
+            strokeDecision == StrokeDecision.FAST_CONFIRMED && isHighConfidence(it)
+        }
         if (earlyPeak != null) {
             val event = confirm(earlyPeak, ImpactConfirmation.EARLY_HIGH_CONFIDENCE)
             if (event != null) {
@@ -117,7 +134,8 @@ class ImpactDetector(private val config: RecognitionConfig) {
             previousPeak.sample.accActivity >= previousPeak.accelerationStartAcc * config.minForwardAccGrowth
         lastDirectionRejected = hasFallenFromPrevious && isScreenNormalRotationDominant(previousPeak.directionSnapshot)
         val event = if (
-            hasFallenFromPrevious && fallIsPrompt && fallCandidateIsFresh && hasForwardGrowth && !lastDirectionRejected
+            (strokeDecision == null || strokeDecision == StrokeDecision.DEFERRED_CONFIRMED) &&
+                hasFallenFromPrevious && fallIsPrompt && fallCandidateIsFresh && hasForwardGrowth && !lastDirectionRejected
         ) confirm(previousPeak) else null
 
         val currentPeak = pendingPeak

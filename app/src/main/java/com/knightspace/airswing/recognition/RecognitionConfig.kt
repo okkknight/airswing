@@ -7,11 +7,16 @@ data class RecognitionConfig(
 
     // Phone engineering initial values; tune here only after real-device evidence.
     val swingImpactWindowMs: Long = 2_000, // research-reference complete stroke window; retained for high-confidence recovery
+    val strokeEvidencePreMs: Long = 160, // phone engineering initial value: complete forward-swing context
+    val strokeEvidencePostMs: Long = 80, // phone engineering initial value: bounded medium-confidence confirmation
+    val maxPeakCooccurrenceMs: Long = 60, // phone engineering initial value: IPF peak locality
+    val minTranslationCoupling: Float = 2f, // phone engineering initial value: linear impulse relative to rotation
     val fallCandidateWindowMs: Long = 500, // phone engineering initial value: causal low-confidence association
     val fallConfirmationWindowMs: Long = 150, // phone engineering initial value: only a prompt local fall confirms
     val minForwardGyroGrowth: Float = 1.5f, // phone engineering initial value: dimensionless phase consistency
     val minForwardAccGrowth: Float = 1.2f, // recall-first: retain weaker genuine phone swings
     val lowPassCutoffHz: Float = 8f, // research-inspired cutoff; timestamp-derived alpha preserves ~200 Hz tuning
+    val gravityFallbackCutoffHz: Float = .7f, // phone engineering fallback when Rotation Vector is unavailable
     val baselineAlpha: Float = .04f,
     val minimumBaseline: Float = .1f,
     val maxFrameDeltaMs: Long = 100, // phone engineering initial value

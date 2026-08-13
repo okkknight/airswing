@@ -80,10 +80,12 @@ class RecognitionPipelineTest {
 
     private fun parseReplayFrames(lines: Sequence<String>): Sequence<SensorFrame> = sequence {
         var timelineFormat = false
+        var hasWorldLinearColumns = false
         lines.forEach { line ->
             if (line.isBlank() || line.startsWith('#')) return@forEach
             if (line.startsWith("row_type,")) {
                 timelineFormat = true
+                hasWorldLinearColumns = line.contains("world_linear_ax")
                 return@forEach
             }
             if (line.startsWith("timestamp_ns,")) return@forEach
@@ -98,6 +100,9 @@ class RecognitionPipelineTest {
                 gx = value[offset + 4].toFloat(),
                 gy = value[offset + 5].toFloat(),
                 gz = value[offset + 6].toFloat(),
+                worldLinearAx = if (hasWorldLinearColumns) value.getOrNull(offset + 7).orEmpty().toFloatOrNull() ?: Float.NaN else Float.NaN,
+                worldLinearAy = if (hasWorldLinearColumns) value.getOrNull(offset + 8).orEmpty().toFloatOrNull() ?: Float.NaN else Float.NaN,
+                worldLinearAz = if (hasWorldLinearColumns) value.getOrNull(offset + 9).orEmpty().toFloatOrNull() ?: Float.NaN else Float.NaN,
             ))
         }
     }
@@ -136,6 +141,26 @@ class RecognitionPipelineTest {
         assertNotNull(event)
         assertTrue(event.impactScore > 0f)
         assertEquals(9f, event.peakAngularSpeedRadPerSecond)
+    }
+
+    @Test fun `rejected stroke evidence cannot emit an impact from a valid local peak`() {
+        val detector = ImpactDetector(RecognitionConfig(
+            minImpactScore = .1f,
+            minImpactGyro = 0f,
+            minImpactAcc = 0f,
+            minForwardGyroGrowth = 1f,
+            minForwardAccGrowth = 1f,
+        ))
+        prime(detector)
+        detector.process(sample(100, 9f, 15f), candidateSwing(100, 9f, 15f), StrokeDecision.PENDING)
+
+        val event = detector.process(
+            sample(110, 5f, 8f),
+            followSwing(100, 5f, 8f),
+            StrokeDecision.REJECTED,
+        )
+
+        assertNull(event)
     }
     @Test fun `cooldown suppresses a second local peak`() {
         val detector = ImpactDetector(RecognitionConfig(minImpactScore = .1f, cooldownMs = 280, minImpactGyro = 0f, minImpactAcc = 0f, minForwardGyroGrowth = 1f, minForwardAccGrowth = 1f))
@@ -240,10 +265,12 @@ class RecognitionPipelineTest {
         assertNull(detector.process(
             sample(100, gyro = 29f, acc = 150f),
             SwingUpdate(SwingState.PEAK_CANDIDATE, true, 29f, 150f, .2f),
+            StrokeDecision.FAST_CONFIRMED,
         ))
         val event = detector.process(
             sample(105, gyro = 30f, acc = 160f),
             SwingUpdate(SwingState.FOLLOW_THROUGH, false, 30f, 160f, .2f),
+            StrokeDecision.FAST_CONFIRMED,
         )
 
         assertNotNull(event)
@@ -537,14 +564,14 @@ class RecognitionPipelineTest {
             minImpactAcc = 0f,
         ))
         val sequence = listOf(
-            frame(0, .1f, 9.81f),
-            frame(10, .1f, 9.81f),
-            frame(20, 4f, 11f),
-            frame(30, 6f, 12f),
-            frame(40, 8f, 14f),
-            frame(50, 12f, 20f),
-            frame(60, 7f, 13f),
-            frame(70, 2f, 10f),
+            frame(0, .1f, 9.81f).withWorldLinearAcc(0f),
+            frame(10, .1f, 9.81f).withWorldLinearAcc(0f),
+            frame(20, 4f, 11f).withWorldLinearAcc(4f),
+            frame(30, 6f, 12f).withWorldLinearAcc(8f),
+            frame(40, 8f, 14f).withWorldLinearAcc(16f),
+            frame(50, 12f, 20f).withWorldLinearAcc(30f),
+            frame(60, 7f, 13f).withWorldLinearAcc(12f),
+            frame(70, 2f, 10f).withWorldLinearAcc(2f),
         )
 
         val impacts = sequence.mapNotNull { pipeline.process(it).impact }
@@ -565,12 +592,12 @@ class RecognitionPipelineTest {
             impactOffsetMs = 0,
         ))
         val sequence = buildList {
-            add(frame(0, .1f, 9.81f))
-            add(frame(10, .1f, 9.81f))
-            add(frame(20, 4f, 11.81f))
-            for (time in 30L..480L step 10) add(frame(time, 4f, 11.81f))
-            add(frame(500, 14f, 29.81f))
-            add(frame(510, 6f, 15.81f))
+            add(frame(0, .1f, 9.81f).withWorldLinearAcc(0f))
+            add(frame(10, .1f, 9.81f).withWorldLinearAcc(0f))
+            add(frame(20, 4f, 11.81f).withWorldLinearAcc(4f))
+            for (time in 30L..480L step 10) add(frame(time, 4f, 11.81f).withWorldLinearAcc(4f))
+            add(frame(500, 14f, 29.81f).withWorldLinearAcc(35f))
+            add(frame(510, 6f, 15.81f).withWorldLinearAcc(12f))
         }
 
         val results = sequence.map { pipeline.process(it) }
@@ -694,4 +721,10 @@ class RecognitionPipelineTest {
         startAcc = acc,
     )
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(ms * 1_000_000, acc, 0f, 0f, gyro, 0f, 0f)
+
+    private fun SensorFrame.withWorldLinearAcc(x: Float) = copy(
+        worldLinearAx = x,
+        worldLinearAy = 0f,
+        worldLinearAz = 0f,
+    )
 }

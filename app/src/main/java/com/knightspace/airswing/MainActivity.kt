@@ -169,6 +169,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
     var status by remember { mutableStateOf(PlayStatus.LOADING) }
     var pulse by remember { mutableStateOf(false) }
     var debugText by remember { mutableStateOf("") }
+    var hapticCalibrationDelayMs by remember { mutableIntStateOf(0) }
     val sessionStartedAtMs = remember { System.currentTimeMillis() }
     val config = remember { RecognitionConfig() }
     val recorder = remember {
@@ -237,7 +238,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                     detectorState = result.swing.state.name,
                     swingScore = result.swing.swingScore,
                     impactScore = result.impactScore,
-                    detail = "candidate=true",
+                    detail = "candidate=true;stroke_decision=${result.strokeDecision}",
                 )
                 Log.d(LOG_TAG, "candidate sensorMs=${frame.timestampMs} score=${result.swing.swingScore}")
             }
@@ -261,23 +262,36 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                         swingScore = result.swing.swingScore,
                         impactScore = event.impactScore,
                         eventTimestampNs = event.timestampNs,
-                        detail = "strength=${config.mapStrength(event.strength)};confirmation=${event.confirmation}",
+                        detail = "strength=${config.mapStrength(event.strength)};confirmation=${event.confirmation};stroke_decision=${result.strokeDecision}",
                     )
                 }
                 handler.postDelayed({
                     val dispatchNs = SystemClock.elapsedRealtimeNanos()
-                    val accepted = status == PlayStatus.READY && feedback.dispatch(event)
+                    val audioRequested = status == PlayStatus.READY
+                    val audioAccepted = audioRequested && feedback.requestAudio(event)
                     if (BuildConfig.DEBUG) {
                         recorder.recordEvent(
-                            rowType = "audio_haptic",
+                            rowType = "audio_requested",
                             timestampNs = dispatchNs,
                             detectorState = lastSwingState,
                             impactScore = event.impactScore,
                             eventTimestampNs = event.timestampNs,
-                            detail = "accepted=$accepted;play=$status;feedback=${audio.status}",
+                            detail = "accepted=$audioAccepted;play=$status;feedback=${audio.status}",
                         )
                     }
-                    if (accepted) {
+                    if (audioAccepted) {
+                        handler.postDelayed({
+                            val hapticNs = SystemClock.elapsedRealtimeNanos()
+                            val hapticAccepted = feedback.requestHaptic()
+                            if (BuildConfig.DEBUG) recorder.recordEvent(
+                                rowType = "haptic_requested",
+                                timestampNs = hapticNs,
+                                detectorState = lastSwingState,
+                                impactScore = event.impactScore,
+                                eventTimestampNs = event.timestampNs,
+                                detail = "requested=true;accepted=$hapticAccepted;calibration_delay_ms=$hapticCalibrationDelayMs",
+                            )
+                        }, hapticCalibrationDelayMs.toLong())
                         lastImpactTimestampMs = event.timestampNs / 1_000_000
                         count++
                         if (event.peakAngularSpeedRadPerSecond > peakSwingSpeed) {
@@ -299,11 +313,11 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                             Log.d(
                                 LOG_TAG,
                                 "impact sensorMs=$lastImpactTimestampMs dispatchMs=${dispatchNs / 1_000_000} " +
-                                    "score=${event.impactScore} audioHaptic=called",
+                                "score=${event.impactScore} audio=called haptic_delay_ms=$hapticCalibrationDelayMs",
                             )
                         }
                     } else if (BuildConfig.DEBUG) {
-                        Log.w(LOG_TAG, "impact rejected play=$status feedback=${audio.status}")
+                        Log.w(LOG_TAG, "audio rejected play=$status feedback=${audio.status}")
                     }
                 }, feedbackDelayMs(event.timestampNs, detectedAtNs))
             }
@@ -334,7 +348,7 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
                 if (BuildConfig.DEBUG) {
                     debugText = "sensor=${sensor.isRunning} frames=${sensor.frameCount} " +
                         "dt=${String.format(Locale.US, "%.1f", sensor.sampleIntervalMs)}ms\n" +
-                        "audio=${audio.status} state=$lastSwingState " +
+                        "audio=${audio.status} rotation=${sensor.usingRotationVector} state=$lastSwingState " +
                         "swing=${String.format(Locale.US, "%.1f", lastSwingScore)} " +
                         "impact=${String.format(Locale.US, "%.1f", lastImpactScore)} " +
                         "last=$lastImpactTimestampMs"
@@ -389,6 +403,12 @@ private fun PlayPage(onEnd: (SessionSummary) -> Unit) {
             if (recorder.frameCount > 0 && !recorder.isRecording) {
                 Button(onClick = { exportCsv.launch("airswing-session.csv") }) {
                     Text("导出 CSV（${recorder.frameCount} 帧 / ${recorder.rowCount} 行）")
+                }
+            }
+            Text("震动校准（仅调试）：${hapticCalibrationDelayMs}ms", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0, 12, 24).forEach { delay ->
+                    Button(onClick = { hapticCalibrationDelayMs = delay }) { Text("${delay}ms") }
                 }
             }
             Spacer(Modifier.height(16.dp))

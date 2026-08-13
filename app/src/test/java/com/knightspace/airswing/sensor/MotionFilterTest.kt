@@ -63,6 +63,17 @@ class MotionFilterTest {
         assertTrue(planar.screenNormalRotationRatio < .2f)
     }
 
+    @Test
+    fun `world linear acceleration is retained separately from gravity inclusive acceleration`() {
+        val filter = MotionFilter(RecognitionConfig(lowPassCutoffHz = Float.POSITIVE_INFINITY))
+        filter.process(frameWithWorldLinearAcceleration(0, 0f))
+
+        val sample = filter.process(frameWithWorldLinearAcceleration(10, 24f))
+
+        assertEquals(24f, sample.linearAccMagnitude, absoluteTolerance = .01f)
+        assertEquals(0f, sample.accActivity, absoluteTolerance = .01f)
+    }
+
     private fun frame(ms: Long, gyro: Float, acc: Float) = SensorFrame(
         timestampNs = ms * 1_000_000,
         ax = acc,
@@ -81,5 +92,18 @@ class MotionFilterTest {
         gx = gx,
         gy = gy,
         gz = gz,
+    )
+
+    private fun frameWithWorldLinearAcceleration(ms: Long, linearAx: Float) = SensorFrame(
+        timestampNs = ms * 1_000_000,
+        ax = 0f,
+        ay = 0f,
+        az = 9.81f,
+        gx = 0f,
+        gy = 0f,
+        gz = 0f,
+        worldLinearAx = linearAx,
+        worldLinearAy = 0f,
+        worldLinearAz = 0f,
     )
 }

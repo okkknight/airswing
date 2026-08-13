@@ -51,10 +51,16 @@ class FeedbackCoordinator(
     private val audio: ImpactAudio,
     private val haptic: ImpactHaptic,
 ) {
-    fun dispatch(event: VirtualImpactEvent): Boolean {
+    fun requestAudio(event: VirtualImpactEvent): Boolean {
         if (audio.status != FeedbackStatus.READY) return false
-        if (!audio.play(event)) return false
-        haptic.play()
+        return audio.play(event)
+    }
+
+    fun requestHaptic(): Boolean = haptic.play()
+
+    fun dispatch(event: VirtualImpactEvent): Boolean {
+        if (!requestAudio(event)) return false
+        requestHaptic()
         return true
     }
 }
