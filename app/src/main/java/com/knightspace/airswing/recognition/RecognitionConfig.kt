@@ -9,8 +9,10 @@ data class RecognitionConfig(
     val swingImpactWindowMs: Long = 2_000, // research-reference complete stroke window; retained for high-confidence recovery
     val strokeEvidencePreMs: Long = 160, // phone engineering initial value: complete forward-swing context
     val strokeEvidencePostMs: Long = 80, // phone engineering initial value: bounded medium-confidence confirmation
+    val deferredCandidateWindowMs: Long = 500, // phone engineering initial value: never let an old candidate authorize a delayed peak
     val maxPeakCooccurrenceMs: Long = 60, // phone engineering initial value: IPF peak locality
     val minTranslationCoupling: Float = 2f, // phone engineering initial value: linear impulse relative to rotation
+    val minTranslationImpulseCoherence: Float = .6f, // phone engineering initial value: reject cyclic wrist rotation, retain one-direction forward impulse
     val fallCandidateWindowMs: Long = 500, // phone engineering initial value: causal low-confidence association
     val fallConfirmationWindowMs: Long = 150, // phone engineering initial value: only a prompt local fall confirms
     val minForwardGyroGrowth: Float = 1.5f, // phone engineering initial value: dimensionless phase consistency

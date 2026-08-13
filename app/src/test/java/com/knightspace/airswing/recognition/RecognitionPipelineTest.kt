@@ -65,12 +65,13 @@ class RecognitionPipelineTest {
         println("AirSwing phone replay: candidates=${candidateTimesMs.size} candidateTimesMs=$candidateTimesMs")
         println("AirSwing phone replay: impacts=${impactTimesMs.size} impactTimesMs=$impactTimesMs")
         println("AirSwing phone replay: impactDelaysMs=$impactDelaysMs confirmations=$confirmations directionRejects=$directionRejects")
-        val expectedMinimum = System.getenv("AIRSWING_REPLAY_MIN_IMPACTS")?.toIntOrNull() ?: 1
+        val expectedExact = System.getenv("AIRSWING_REPLAY_EXPECTED_IMPACTS")?.toIntOrNull()
+        val expectedMinimum = System.getenv("AIRSWING_REPLAY_MIN_IMPACTS")?.toIntOrNull() ?: if (expectedExact == 0) 0 else 1
         assertTrue(
             impactTimesMs.size >= expectedMinimum,
             "expected at least $expectedMinimum impacts, got ${candidateTimesMs.size} candidates and ${impactTimesMs.size} impacts",
         )
-        System.getenv("AIRSWING_REPLAY_EXPECTED_IMPACTS")?.toIntOrNull()?.let { expected ->
+        expectedExact?.let { expected ->
             assertEquals(expected, impactTimesMs.size, "unexpected real-device replay impact count")
         }
         System.getenv("AIRSWING_REPLAY_EXPECTED_DIRECTION_REJECTS")?.toIntOrNull()?.let { expected ->

@@ -17,20 +17,21 @@ class StrokeEvidenceAnalyzer(private val config: RecognitionConfig) {
     private var next = 0
     private var size = 0
     private var candidateAtMs = Long.MIN_VALUE
+    private var forwardStartedAtMs = Long.MIN_VALUE
     private var coupledPeakAtMs = Long.MIN_VALUE
     private var coupledPeakScore = 0f
     private var previousGyro = 0f
     private var previousLinear = 0f
     private var decision = StrokeDecision.PENDING
 
-    /** Debug-only scalar: 1 means the recent linear motion kept a direction. */
+    /** Debug-only scalar: resultant / total linear impulse in the forward window. */
     var lastAxisCoherence: Float = 0f
         private set
 
     fun process(sample: MotionSample, swing: SwingUpdate): StrokeDecision {
         if (sample.deltaReset) reset()
         append(sample)
-        if (swing.candidate) begin(sample)
+        if (swing.candidate) begin(sample, swing)
         if (candidateAtMs == Long.MIN_VALUE || decision != StrokeDecision.PENDING) return decision
 
         val coupledLinear = nearbyLinearPeak(sample.timestampMs)
@@ -41,9 +42,10 @@ class StrokeEvidenceAnalyzer(private val config: RecognitionConfig) {
             coupledPeakScore = score
             coupledPeakAtMs = sample.timestampMs
         }
-        lastAxisCoherence = axisCoherence(sample.timestampMs)
+        lastAxisCoherence = translationImpulseCoherence(sample.timestampMs)
 
-        if (coupled && sample.gyroActivity >= config.earlyImpactGyro &&
+        if (coupled && lastAxisCoherence >= config.minTranslationImpulseCoherence &&
+            sample.gyroActivity >= config.earlyImpactGyro &&
             coupledLinear >= config.earlyImpactAcc
         ) {
             decision = StrokeDecision.FAST_CONFIRMED
@@ -56,8 +58,12 @@ class StrokeEvidenceAnalyzer(private val config: RecognitionConfig) {
         val hasFallen = sample.gyroActivity < previousGyro && sample.linearAccMagnitude < previousLinear
         val sincePeak = sample.timestampMs - coupledPeakAtMs
         if (coupledPeakAtMs != Long.MIN_VALUE && hasFallen && sincePeak in 0..config.strokeEvidencePostMs) {
-            decision = StrokeDecision.DEFERRED_CONFIRMED
-        } else if (sample.timestampMs - candidateAtMs >= config.swingImpactWindowMs) {
+            decision = if (lastAxisCoherence >= config.minTranslationImpulseCoherence) {
+                StrokeDecision.DEFERRED_CONFIRMED
+            } else {
+                StrokeDecision.REJECTED
+            }
+        } else if (sample.timestampMs - candidateAtMs >= config.deferredCandidateWindowMs) {
             decision = StrokeDecision.REJECTED
         }
         previousGyro = sample.gyroActivity
@@ -69,6 +75,7 @@ class StrokeEvidenceAnalyzer(private val config: RecognitionConfig) {
         next = 0
         size = 0
         candidateAtMs = Long.MIN_VALUE
+        forwardStartedAtMs = Long.MIN_VALUE
         coupledPeakAtMs = Long.MIN_VALUE
         coupledPeakScore = 0f
         previousGyro = 0f
@@ -77,8 +84,10 @@ class StrokeEvidenceAnalyzer(private val config: RecognitionConfig) {
         lastAxisCoherence = 0f
     }
 
-    private fun begin(sample: MotionSample) {
+    private fun begin(sample: MotionSample, swing: SwingUpdate) {
         candidateAtMs = sample.timestampMs
+        forwardStartedAtMs = swing.accelerationStartTimestampMs.takeIf { it in 0..sample.timestampMs }
+            ?: (candidateAtMs - config.strokeEvidencePreMs)
         coupledPeakAtMs = Long.MIN_VALUE
         coupledPeakScore = 0f
         previousGyro = sample.gyroActivity
@@ -103,25 +112,22 @@ class StrokeEvidenceAnalyzer(private val config: RecognitionConfig) {
         return peak
     }
 
-    private fun axisCoherence(timestampMs: Long): Float {
-        var previous: MotionSample? = null
-        var sum = 0f
-        var pairs = 0
+    private fun translationImpulseCoherence(timestampMs: Long): Float {
+        val startMs = maxOf(forwardStartedAtMs, timestampMs - config.strokeEvidencePreMs)
+        var sumX = 0f
+        var sumY = 0f
+        var sumZ = 0f
+        var total = 0f
         for (i in 0 until size) {
             val item = history[(next - 1 - i + history.size) % history.size] ?: continue
-            if (timestampMs - item.timestampMs > config.strokeEvidencePreMs) break
-            val prior = previous
-            if (prior != null) {
-                val a = item.linearAccMagnitude
-                val b = prior.linearAccMagnitude
-                if (a > config.minImpactAcc && b > config.minImpactAcc) {
-                    val dot = item.linearAccX * prior.linearAccX + item.linearAccY * prior.linearAccY + item.linearAccZ * prior.linearAccZ
-                    sum += (dot / (a * b)).coerceIn(-1f, 1f)
-                    pairs++
-                }
+            if (item.timestampMs < startMs) break
+            if (item.linearAccMagnitude >= config.minImpactAcc) {
+                sumX += item.linearAccX
+                sumY += item.linearAccY
+                sumZ += item.linearAccZ
+                total += item.linearAccMagnitude
             }
-            previous = item
         }
-        return if (pairs == 0) 0f else sum / pairs
+        return if (total == 0f) 0f else sqrt(sumX * sumX + sumY * sumY + sumZ * sumZ) / total
     }
 }
