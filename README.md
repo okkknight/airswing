@@ -2,6 +2,10 @@
 
 离线 Android 羽毛球空气挥拍 MVP。传感器到反馈链路为：`Accelerometer + Gyroscope → SwingDetector → ImpactDetector → SoundPool + Haptic`。
 
+## 许可
+
+应用代码以 [MIT 许可证](LICENSE)发布。击球音效及其来源录音另按 CC0 1.0 使用，来源和处理方式见 [音效许可说明](AUDIO_LICENSES.md)。
+
 ## 构建
 
 ```bash

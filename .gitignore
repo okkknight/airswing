@@ -1,4 +1,5 @@
 .gradle/
+.DS_Store
 build/
 local.properties
 *.iml
@@ -6,4 +7,3 @@ local.properties
 captures/
 *.apk
 *.aab
-
